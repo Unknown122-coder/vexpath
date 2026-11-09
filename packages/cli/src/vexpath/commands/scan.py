@@ -100,6 +100,17 @@ def command(
             ),
         ),
     ] = None,
+    download_missing: Annotated[
+        bool,
+        typer.Option(
+            "--download-missing",
+            help=(
+                "Fetch a dependency's source from the package index when it is "
+                "not installed. Reaches the network. Without it, a scan of a "
+                "lockfile alone can confirm findings but never clear them."
+            ),
+        ),
+    ] = False,
     no_cache: Annotated[
         bool,
         typer.Option(
@@ -146,6 +157,7 @@ def command(
         ),
         environment=environment,
         use_cache=not no_cache,
+        download_missing=download_missing,
     )
 
     try:

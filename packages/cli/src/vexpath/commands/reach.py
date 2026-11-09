@@ -94,6 +94,17 @@ def command(
             help="Use this lockfile instead of searching the directory.",
         ),
     ] = None,
+    download_missing: Annotated[
+        bool,
+        typer.Option(
+            "--download-missing",
+            help=(
+                "Fetch a dependency's source from the package index when it is "
+                "not installed. Reaches the network. Without it, a scan of a "
+                "lockfile alone can confirm findings but never clear them."
+            ),
+        ),
+    ] = False,
     no_cache: Annotated[
         bool,
         typer.Option("--no-cache", help="Rebuild dependency graphs instead of reusing them."),
@@ -114,6 +125,7 @@ def command(
         entry_points=_split(entry_point),
         environment=environment,
         use_cache=not no_cache,
+        download_missing=download_missing,
     )
 
     try:

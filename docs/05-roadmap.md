@@ -301,10 +301,34 @@ That number first read 34.3 %, because the denominator was the whole corpus and
 can ever score. The same wrong-divisor mistake as the fix-commit gate in M1,
 and it would again have made a working system look broken.
 
+### Done: graphs from the package index
+
+Reachability needs a dependency's own code, and the cheapest source is the
+project's installed environment. Two situations have none: a pull-request check
+where only the lockfile changed and nothing has been installed, and a benchmark
+over many projects where building an environment each costs more than the
+measurement. Installing the dependencies would run arbitrary setup code from
+every one of them; downloading the wheel and reading it does not.
+
+`--download-missing` fetches a dependency's exact version from the index when
+it is absent or at the wrong version, prefers a pure-Python wheel because its
+layout is already the import layout, and falls back to an sdist. Reported in
+the scan's notes, because a verdict resting on a downloaded archive rests on a
+different thing from one resting on the environment the reader is in.
+
+An archive is third-party data that gets unpacked to disk, so most of its tests
+are refusals: a member whose path escapes the extraction directory, a symlink
+member, an absolute path, a host off the allow-list, a declared size and a
+real body above the cap, and a member count that looks like a bomb. Only Python
+and metadata files are written at all. Nothing is ever executed, and a test
+proves it by unpacking a `setup.py` that would exit the process if it ran.
+
+Verified against the real index: the nltk project from the demonstration above,
+scanned with an empty environment and `--download-missing`, reaches the same
+verdict with the same evidence as it did with the package installed.
+
 ### Remaining
 
-- Dependency graphs from downloaded archives, for packages a scan's environment
-  does not have installed.
 - The benchmark over 30 real repositories.
 - Scheduling extraction in the reference deployment, which waits for M4: the
   sync workflow publishes a snapshot and has no database to extract into.

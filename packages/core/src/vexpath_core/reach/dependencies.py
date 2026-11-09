@@ -12,7 +12,11 @@ Where that source comes from, in order of preference:
 2. **The installed environment.** The project's own virtual environment
    already holds the exact versions its lockfile pins. Reading them is far
    cheaper than downloading anything, and the files are already on disk.
-3. **Nothing.** A dependency with no available source is reported as such, and
+3. **The package index.** A scan of a lockfile alone has nothing installed,
+   and installing it would run arbitrary setup code from every dependency.
+   Downloading the wheel and reading it does not. Off by default, because it
+   reaches the network.
+4. **Nothing.** A dependency with no available source is reported as such, and
    findings against it can be confirmed but never cleared.
 
 Distribution metadata is read as data: `METADATA` and `top_level.txt` are text
@@ -22,12 +26,14 @@ files. Nothing is imported, and no installed package's code runs.
 from __future__ import annotations
 
 import sys
+import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from vexpath_core.models.sbom import Component
 from vexpath_core.purl import normalise_name
+from vexpath_core.reach.archives import ArchiveError, ArchiveSource, importable_names
 from vexpath_core.reach.cache import GraphCache
 from vexpath_core.reach.graph import CallGraph
 from vexpath_core.reach.pybuild import SourceRoot, build
@@ -82,6 +88,10 @@ class DependencyGraphs:
     unavailable: dict[str, str] = field(default_factory=dict)
     cache_hits: int = 0
     cache_misses: int = 0
+    #: Packages graphed from a downloaded archive rather than from the
+    #: environment, with a note naming what was used. Recorded because a
+    #: reader should know which source a verdict rests on.
+    from_archive: dict[str, str] = field(default_factory=dict)
 
     @property
     def cache_hit_ratio(self) -> float:
@@ -220,6 +230,7 @@ def graphs_for(
     *,
     locations: Sequence[Path] | None = None,
     cache: GraphCache | None = None,
+    archives: ArchiveSource | None = None,
 ) -> DependencyGraphs:
     """Build or load a call graph for each component that has one available.
 
@@ -227,6 +238,12 @@ def graphs_for(
     A version mismatch means the environment is not what the lockfile
     describes, and graphing the wrong version would produce a verdict about
     code the project does not ship.
+
+    When ``archives`` is given, a component that is absent or at the wrong
+    version is fetched from the package index instead. The archive is always
+    of the exact version the inventory names, so it is the more trustworthy
+    source of the two; the environment is preferred only because it is already
+    on disk.
     """
     installed = discover_installed(
         locations if locations is not None else site_packages_directories()
@@ -239,36 +256,20 @@ def graphs_for(
             # layer, not as missing graphs.
             continue
 
-        distribution = installed.get(component.name)
-        if distribution is None:
-            result.unavailable[component.name] = "not installed in the environment being scanned"
-            continue
-        if distribution.version != component.version:
-            result.unavailable[component.name] = (
-                f"the environment has {distribution.version} but the inventory "
-                f"says {component.version}, so its graph would describe code "
-                f"this project does not ship"
-            )
-            continue
-        if not distribution.is_graphable:
-            result.unavailable[component.name] = (
-                "no importable top-level package, or excluded as build tooling"
-            )
-            continue
-
         graph = cache.get(component.name, component.version) if cache else None
         if graph is not None:
             result.cache_hits += 1
         else:
             result.cache_misses += 1
+            source = _source_root(component, installed, result)
+            if source is None:
+                if archives is None:
+                    continue
+                source = _from_archive(component, archives, result)
+                if source is None:
+                    continue
             graph = build(
-                [
-                    SourceRoot(
-                        path=distribution.location,
-                        package=component.name,
-                        top_level=distribution.top_level,
-                    )
-                ],
+                [source],
                 package=component.name,
                 version=component.version,
             )
@@ -285,6 +286,67 @@ def graphs_for(
         result.analysed.add(component.name)
 
     return result
+
+
+def _source_root(
+    component: Component,
+    installed: dict[str, InstalledDistribution],
+    result: DependencyGraphs,
+) -> SourceRoot | None:
+    """The installed distribution to graph, or None with a reason recorded."""
+    distribution = installed.get(component.name)
+    if distribution is None:
+        result.unavailable[component.name] = "not installed in the environment being scanned"
+        return None
+    if distribution.version != component.version:
+        result.unavailable[component.name] = (
+            f"the environment has {distribution.version} but the inventory "
+            f"says {component.version}, so its graph would describe code "
+            f"this project does not ship"
+        )
+        return None
+    if not distribution.is_graphable:
+        result.unavailable[component.name] = (
+            "no importable top-level package, or excluded as build tooling"
+        )
+        return None
+    return SourceRoot(
+        path=distribution.location,
+        package=component.name,
+        top_level=distribution.top_level,
+    )
+
+
+def _from_archive(
+    component: Component, archives: ArchiveSource, result: DependencyGraphs
+) -> SourceRoot | None:
+    """Download and unpack one version, or record why it could not be.
+
+    The archive is deliberately unpacked into a temporary directory that is
+    not cleaned up here: the graph is built from it before this function's
+    caller returns, and the cache holds the graph afterwards, so the files are
+    needed only for that moment. The operating system reclaims them.
+    """
+    destination = Path(tempfile.mkdtemp(prefix=f"vexpath-{component.name}-"))
+    try:
+        root, note = archives.source_root(component.name, component.version, destination)
+    except ArchiveError as exc:
+        # Replaces the environment's reason: the index is the later and better
+        # attempt, so its failure is the one worth reporting.
+        result.unavailable[component.name] = str(exc)
+        return None
+
+    names = importable_names(root)
+    if not names:
+        result.unavailable[component.name] = (
+            f"{component.name} {component.version} was downloaded but contains no "
+            f"importable Python package"
+        )
+        return None
+
+    result.unavailable.pop(component.name, None)
+    result.from_archive[component.name] = note
+    return SourceRoot(path=root, package=component.name, top_level=names)
 
 
 __all__ = [

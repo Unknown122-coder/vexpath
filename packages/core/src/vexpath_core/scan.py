@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
+
 from vexpath_core import RESULTS_SCHEMA
 from vexpath_core import __version__ as core_version
 from vexpath_core.enums import ComponentScope, ScanMode, supports_reachability
@@ -41,6 +43,7 @@ from vexpath_core.reach import (
     mentioned_symbols,
     search,
 )
+from vexpath_core.reach.archives import ArchiveSource
 from vexpath_core.reach.cache import GraphCache, default_cache_directory
 from vexpath_core.reach.dependencies import (
     DependencyGraphs,
@@ -93,6 +96,10 @@ class ScanOptions:
     cache_dir: Path | None = None
     #: Skip the cache entirely, for measuring a cold build.
     use_cache: bool = True
+    #: Download a dependency's source from the package index when it is not
+    #: installed. Reaches the network, so it is opt-in; without it a scan of a
+    #: lockfile alone can confirm findings but never clear them.
+    download_missing: bool = False
 
 
 def scan(
@@ -204,7 +211,14 @@ def prepare_reachability(
     locations = (
         None if resolved.environment is None else site_packages_directories(resolved.environment)
     )
-    dependencies: DependencyGraphs = graphs_for(sbom.components, locations=locations, cache=cache)
+    archives = _archive_source() if resolved.download_missing else None
+    try:
+        dependencies: DependencyGraphs = graphs_for(
+            sbom.components, locations=locations, cache=cache, archives=archives
+        )
+    finally:
+        if archives is not None:
+            archives.client.close()
 
     graph = link([first_party, *dependencies.graphs])
     entry_symbols, entry_points = choose(graph, configured=resolved.entry_points, root=root)
@@ -218,6 +232,14 @@ def prepare_reachability(
     )
 
     notes: list[str] = []
+    if dependencies.from_archive:
+        # Named, because a verdict resting on a downloaded archive rests on a
+        # different thing from one resting on the installed environment.
+        notes.append(
+            f"{len(dependencies.from_archive)} package(s) were graphed from archives "
+            f"downloaded from the package index rather than from an installed "
+            f"environment"
+        )
     if dependencies.unavailable:
         # Named explicitly, because a finding against one of these can be
         # confirmed but never cleared, and a reader should know which.
@@ -272,6 +294,15 @@ def _decide_reachability(
         decided.append(apply(finding, symbols_to_search(finding, advisory), setup.context))
 
     return tuple(decided), setup.entry_points, setup.stats, list(setup.notes)
+
+
+def _archive_source() -> ArchiveSource:
+    """An index-backed source of dependency sources.
+
+    Built here rather than passed in so the HTTP client's lifetime is tied to
+    one reachability run, and closed in the caller's finally block.
+    """
+    return ArchiveSource(client=httpx.Client(timeout=60.0, follow_redirects=True))
 
 
 def _project_roots(root: Path, options: ScanOptions) -> list[Path]:
