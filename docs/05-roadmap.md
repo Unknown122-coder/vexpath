@@ -217,6 +217,61 @@ means diffing the previous release tag against the fixed one, which is the
 `tag_diff` symbol source the design reserves for it, at low confidence.
 That is the next piece of extraction work.
 
+### Done: getting the symbols to the tool that needs them
+
+A downloaded corpus carries no vulnerable symbols, because OSV does not publish
+them. Extraction fills them in but writes to the database, and the command-line
+tool reads a snapshot directory. Without a step between the two, the symbols
+that make reachability work never reach the thing doing the reaching.
+
+`vexpath-worker export-snapshot` writes the database's corpus back out as a
+snapshot, symbols included, in exactly the shape a download produces, content
+hash and all. So a deployment runs sync, extract, export, publish, and what it
+publishes is a corpus with symbols in it.
+
+### Measured end to end, 2026-11-09
+
+Over 150 real PyPI advisories, taken in queue order:
+
+| Measure | Result |
+|---|---|
+| Symbols extracted | 1,411 |
+| Advisories that yielded symbols | 106 of 150 |
+| Symbols per successful advisory | 13.3 |
+| Repositories fetched | 56 |
+| Needing a tag or pull request resolved | 15 |
+| Failed | 0 |
+
+Then the whole path, on a project built for the purpose: pin `nltk==3.9.1`,
+install it, write a four-line application that calls `nltk.download`, and scan
+it against the exported corpus. The scan reported 43 findings, 41 of them under
+investigation because extraction has not yet reached their advisories, and
+`vexpath reach` explained CVE-2026-33236 against a call graph of 25,391 edges
+built from the installed package.
+
+That last step found a precision bug worth more than the demonstration.
+
+**A class reached only by import is not evidence its methods can run.**
+CVE-2026-33236 names nltk's `Downloader` class and its `_download_package`
+method. Importing a module executes its class statements, so the class was
+reached by three import edges from an application that merely imports nltk, and
+the verdict read "reachable_confirmed ... the vulnerable code can run". The
+class statement running is not the vulnerable method running. Such a match is
+now `reachable_possible`, with the reason printed. A *module* reached by import
+is still a confirmation, because when a fix changed module-level code,
+importing the module runs exactly that code.
+
+**A class must not expand to methods the advisory did not name.** The same
+advisory expanded `Downloader` to all 36 of its members, two of which run
+whenever the class is instantiated, so an unrelated method being reachable
+counted as reaching the vulnerability. A class now expands only when the
+advisory names no method inside it, which is the case where its body is the
+only target there is.
+
+Both failures point the same way, and it is the direction this project refuses:
+they turn weak evidence into a confident answer. Neither would have surfaced
+against a fixture.
+
 ### Remaining
 
 - Dependency graphs from downloaded archives, for packages a scan's environment

@@ -10,9 +10,11 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
 > project and its installed dependencies, searches for each advisory's
 > vulnerable symbols, and clears a finding only when no path reaches them.
-> Symbols come from the advisory's fix commit, and `vexpath reach` explains any
-> single verdict in full. What remains in this milestone is the worker that
-> stores extracted symbols, and the benchmark over 30 real repositories. See
+> Symbols come from the advisory's fix commit, extracted by a worker that
+> crawls upstream repositories, and `vexpath reach` explains any single verdict
+> in full. Measured over 150 real PyPI advisories: 1,411 symbols from 106 of
+> them. What remains in this milestone is the benchmark over 30 real
+> repositories and enrichment from EPSS and CISA KEV. See
 > [docs/05-roadmap.md](docs/05-roadmap.md).
 
 ## Quick start
@@ -34,7 +36,18 @@ uv run vexpath reach . --advisory CVE-2024-35195 --snapshot var/advisories
 
 make up                            # Postgres, migrations, API and seeded advisories
 curl localhost:8000/healthz
+
+# The corpus a scan really wants: downloaded, then enriched with the symbols
+# each advisory's fix commit changed. OSV does not publish those.
+uv run python -m vexpath_worker.main sync-advisories var/corpus --ecosystem PyPI
+uv run python -m vexpath_worker.main extract-symbols --batch 500 --cache-root var/repo-cache
+uv run python -m vexpath_worker.main export-snapshot var/enriched --ecosystem PyPI
+uv run vexpath scan . --snapshot var/enriched
 ```
+
+Extraction is a long crawl, and it is built to be stopped: every advisory's
+outcome is committed as it is decided, so run it repeatedly until the backlog
+stops shrinking. Nothing it fetches is ever executed.
 
 What a scan says, and what it refuses to say. A finding is cleared only when
 the analysis traversed the dependency's own code and found no path to the

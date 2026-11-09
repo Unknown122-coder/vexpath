@@ -21,6 +21,7 @@ from vexpath_db.engine import create_sync_engine
 from vexpath_platform.logging import configure_logging, get_logger
 from vexpath_platform.settings import get_settings
 from vexpath_worker import __version__
+from vexpath_worker.jobs.export_snapshot import export_snapshot
 from vexpath_worker.jobs.extract_symbols import (
     DEFAULT_BATCH,
     extract_symbols,
@@ -219,6 +220,58 @@ def extract_symbols_command(
 
     for advisory_id, reason in sorted(report.problems.items())[:10]:
         typer.secho(f"{advisory_id}: {reason}", fg=typer.colors.YELLOW, err=True)
+
+
+@app.command("export-snapshot")
+def export_snapshot_command(
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Where to write the snapshot."),
+    ] = Path("var/enriched"),
+    ecosystems: Annotated[
+        str | None,
+        typer.Option(
+            "--ecosystem",
+            "-e",
+            help="Comma-separated ecosystems to include. Defaults to all of them.",
+        ),
+    ] = None,
+    only_with_symbols: Annotated[
+        bool,
+        typer.Option(
+            "--only-with-symbols",
+            help=(
+                "Write only advisories that have symbols. Smaller, but not a "
+                "substitute for the full corpus: an advisory missing from a "
+                "snapshot produces no finding at all."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Write the database's corpus out as a snapshot, symbols included.
+
+    This is the step that gets extracted symbols to the tool that needs them.
+    A downloaded corpus carries no vulnerable symbols, because OSV does not
+    publish them; extraction fills them in but writes to the database, and the
+    command-line tool reads a snapshot directory.
+
+    So a deployment runs sync, extract, export, publish, and what it publishes
+    is a corpus with symbols in it.
+    """
+    settings = get_settings()
+    configure_logging(settings)
+    names = [name.strip() for name in (ecosystems or "").split(",") if name.strip()]
+    engine = create_sync_engine(settings.database_url)
+    try:
+        report = export_snapshot(
+            engine,
+            directory,
+            ecosystems=names or None,
+            only_with_symbols=only_with_symbols,
+        )
+    finally:
+        engine.dispose()
+    typer.echo(report.summary_line())
 
 
 @app.command()

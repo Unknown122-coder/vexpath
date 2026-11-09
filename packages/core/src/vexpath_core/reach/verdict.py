@@ -37,6 +37,7 @@ from vexpath_core.enums import (
     EntryPointSource,
     ReachReason,
     ReachStatus,
+    SymbolKind,
     Verdict,
     VexJustification,
     supports_reachability,
@@ -123,6 +124,18 @@ def decide(
         if symbol not in context.result.certain and symbol in context.result.possible
     )
 
+    if certain and _only_class_bodies(certain, context):
+        # Every certain match is a class arrived at purely by import. The class
+        # statement ran, which is not the same as its methods running, so this
+        # is a possibility rather than a confirmation.
+        return _reached(
+            ReachStatus.REACHABLE_POSSIBLE,
+            certain,
+            targets,
+            context,
+            symbols,
+            reason=_CLASS_BODY_ONLY,
+        )
     if certain:
         return _reached(ReachStatus.REACHABLE_CONFIRMED, certain, targets, context, symbols)
     if possible:
@@ -168,15 +181,65 @@ def decide(
     )
 
 
+#: Why a class-only match is not a confirmation. Stated once, because it is
+#: shown to a reader and must not drift between the status and the text.
+_CLASS_BODY_ONLY = (
+    "every path to it reaches a class definition by import, which runs the "
+    "class body but not its methods"
+)
+
+
+def _only_class_bodies(matched: Sequence[str], context: ReachabilityContext) -> bool:
+    """True when every match is a class arrived at only through imports.
+
+    Importing a module executes its class statements, so a class is reachable
+    from any code that imports its module. That is real execution, but it is
+    the class body, not the methods inside it. An advisory whose fix changed a
+    method also names the enclosing class, and without this check a one-line
+    application that merely imports the package would be told its vulnerable
+    code can run.
+
+    A module target is deliberately not treated this way: when a fix changed
+    module-level code, importing the module does run exactly that code.
+    """
+    for symbol in matched:
+        node = context.graph.nodes.get(symbol)
+        if node is None or node.kind is not SymbolKind.CLASS:
+            return False
+        path = context.result.path_to(symbol, context.graph)
+        # The first step is the entry point and has no incoming edge.
+        if any(step.edge_kind is not EdgeKind.IMPORT for step in path[1:]):
+            return False
+    return True
+
+
 def _targets(graph: CallGraph, symbols: Sequence[VulnerableSymbol]) -> tuple[str, ...]:
     """Expand an advisory's symbols into the names the search can match.
 
-    A class expands to its methods, because a fix touching a class changed its
-    behaviour. A symbol absent from the graph is kept: it may still appear as
-    the target of a direct call, which is evidence on its own.
+    A class expands to its methods only when the advisory names no method
+    inside it. When the fix touched a class body and nothing finer, its methods
+    are the only way to arrive at that change, so they are the targets. When
+    the advisory does name a method, that method is the target and its siblings
+    are not: measured on nltk's CVE-2026-33236, expanding the class added 36
+    members, two of which run whenever the class is instantiated, and a verdict
+    built on those says the vulnerable code runs whenever any part of the class
+    is used.
+
+    A symbol absent from the graph is kept: it may still appear as the target
+    of a direct call, which is evidence on its own.
     """
-    expanded = list(expand_targets(graph, (symbol.symbol for symbol in symbols)))
-    expanded.extend(symbol.symbol for symbol in symbols)
+    named = {symbol.symbol for symbol in symbols}
+    # Classes the advisory already describes through one of their members.
+    pinned = {
+        parent for symbol in named if (parent := symbol.rpartition(".")[0]) and parent in named
+    }
+
+    expanded = [
+        candidate
+        for candidate in expand_targets(graph, (symbol.symbol for symbol in symbols))
+        if candidate in named or candidate.rpartition(".")[0] not in pinned
+    ]
+    expanded.extend(named)
     return tuple(dict.fromkeys(expanded))
 
 
@@ -186,6 +249,8 @@ def _reached(
     searched: tuple[str, ...],
     context: ReachabilityContext,
     symbols: Sequence[VulnerableSymbol],
+    *,
+    reason: str | None = None,
 ) -> ReachabilityResult:
     path = context.result.path_to(matched[0], context.graph)
     via_dynamic = (
@@ -211,7 +276,7 @@ def _reached(
         via_dynamic_edges=via_dynamic,
         entry_points=context.entry_points,
         graph_stats=_stats(context),
-        explanation=_reached_explanation(status, matched, path, context),
+        explanation=_reached_explanation(status, matched, path, context, reason=reason),
     )
 
 
@@ -302,6 +367,8 @@ def _reached_explanation(
     matched: tuple[str, ...],
     path: Sequence[object],
     context: ReachabilityContext,
+    *,
+    reason: str | None = None,
 ) -> str:
     """Describe a reachable verdict in the terms a reader checks it in.
 
@@ -325,6 +392,12 @@ def _reached_explanation(
             f"call(s). The vulnerable code can run."
         )
 
+    if reason is not None:
+        return (
+            f"{symbol} is reached from {start}, but {reason}. Whether the "
+            f"changed code runs depends on something this analysis could not "
+            f"see, so treat it as reachable until proven otherwise."
+        )
     if calls == 0:
         return (
             f"{symbol} is itself an entry point of this project, but reaching it "

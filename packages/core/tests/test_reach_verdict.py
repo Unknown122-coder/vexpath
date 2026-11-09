@@ -318,3 +318,142 @@ def test_linking_merges_quality_so_statistics_stay_honest() -> None:
     assert merged.quality.call_sites == 100
     assert merged.quality.unresolved_call_sites == 10
     assert merged.quality.unresolved_ratio == pytest.approx(0.10)
+
+
+# --- Classes: reaching the body is not reaching the methods ----------------
+
+CLASS_SYMBOL = "requests.sessions.Session"
+SIBLING = "requests.sessions.Session.__init__"
+
+
+def _class_graph(*, arrival: EdgeKind) -> CallGraph:
+    """A project that reaches a dependency's class, and that class's methods.
+
+    ``arrival`` is how the class itself is reached: by import, as any module
+    that defines it reaches it, or by a resolved call, as a constructor does.
+    """
+    nodes = {
+        "app.main": Node("app.main", SymbolKind.MODULE, file="app/main.py", line=1),
+        "requests.sessions": Node(
+            "requests.sessions",
+            SymbolKind.MODULE,
+            file="requests/sessions.py",
+            line=1,
+            package=PACKAGE,
+        ),
+        CLASS_SYMBOL: Node(
+            CLASS_SYMBOL,
+            SymbolKind.CLASS,
+            file="requests/sessions.py",
+            line=400,
+            package=PACKAGE,
+        ),
+        SIBLING: Node(
+            SIBLING, SymbolKind.METHOD, file="requests/sessions.py", line=405, package=PACKAGE
+        ),
+        TARGET: Node(
+            TARGET, SymbolKind.METHOD, file="requests/sessions.py", line=700, package=PACKAGE
+        ),
+    }
+    return CallGraph(
+        nodes=nodes,
+        edges={
+            "app.main": (Edge("app.main", "requests.sessions", EdgeKind.IMPORT, 1),),
+            "requests.sessions": (Edge("requests.sessions", CLASS_SYMBOL, arrival, 400),),
+            # Constructing the class runs __init__, which the fix did not touch.
+            CLASS_SYMBOL: (Edge(CLASS_SYMBOL, SIBLING, EdgeKind.STATIC, 405),),
+        },
+        quality=GraphQuality(call_sites=10, files_parsed=2),
+    )
+
+
+def test_a_class_reached_only_by_import_is_not_a_confirmation() -> None:
+    """Found on real data, against nltk's CVE-2026-33236.
+
+    Importing a module executes its class statements, so a class is reached by
+    any code that imports its module. The class body running is not its
+    methods running, and saying "the vulnerable code can run" on that basis
+    overstates what was proven.
+    """
+    context = _context(_class_graph(arrival=EdgeKind.IMPORT))
+    result = decide(
+        _finding(),
+        [
+            _symbol(CLASS_SYMBOL, kind=SymbolKind.CLASS),
+            _symbol(TARGET, kind=SymbolKind.METHOD),
+        ],
+        context,
+    )
+
+    assert result.status is ReachStatus.REACHABLE_POSSIBLE
+    assert "runs the class body but not its methods" in result.explanation
+    # Still reported, never cleared: the method may well be called through
+    # something the analysis could not resolve.
+    assert result.status.is_reachable
+    assert not result.status.may_suppress
+
+
+def test_a_class_reached_by_a_resolved_call_is_a_confirmation() -> None:
+    """Constructing a class is not merely defining it."""
+    context = _context(_class_graph(arrival=EdgeKind.STATIC))
+    result = decide(
+        _finding(),
+        [_symbol(CLASS_SYMBOL, kind=SymbolKind.CLASS), _symbol(TARGET)],
+        context,
+    )
+    assert result.status is ReachStatus.REACHABLE_CONFIRMED
+
+
+def test_a_named_method_stops_its_siblings_counting_as_the_target() -> None:
+    """Expanding a class to every method manufactures reachability.
+
+    Measured on nltk: the expansion added 36 members, two of which run whenever
+    the class is instantiated. A verdict built on those says the vulnerable
+    code runs whenever any part of the class is used.
+    """
+    context = _context(_class_graph(arrival=EdgeKind.IMPORT))
+    result = decide(
+        _finding(),
+        [
+            _symbol(CLASS_SYMBOL, kind=SymbolKind.CLASS),
+            _symbol(TARGET, kind=SymbolKind.METHOD),
+        ],
+        context,
+    )
+    # __init__ is reachable and belongs to the class, but the fix named a
+    # different method, so it is not a target.
+    assert SIBLING not in result.matched_symbols
+    assert SIBLING not in result.searched_symbols
+
+
+def test_a_class_named_alone_still_expands_to_its_methods() -> None:
+    """With no finer target, the methods are the only way to arrive there."""
+    context = _context(_class_graph(arrival=EdgeKind.IMPORT))
+    result = decide(_finding(), [_symbol(CLASS_SYMBOL, kind=SymbolKind.CLASS)], context)
+    # __init__ is reached by a resolved call, so this is a confirmation.
+    assert result.status is ReachStatus.REACHABLE_CONFIRMED
+    assert SIBLING in result.matched_symbols
+
+
+def test_a_module_reached_by_import_remains_a_confirmation() -> None:
+    """When a fix changed module-level code, importing it runs exactly that."""
+    graph = CallGraph(
+        nodes={
+            "app.main": Node("app.main", SymbolKind.MODULE, file="app/main.py", line=1),
+            "requests.sessions": Node(
+                "requests.sessions",
+                SymbolKind.MODULE,
+                file="requests/sessions.py",
+                line=1,
+                package=PACKAGE,
+            ),
+        },
+        edges={"app.main": (Edge("app.main", "requests.sessions", EdgeKind.IMPORT, 1),)},
+        quality=GraphQuality(call_sites=10, files_parsed=2),
+    )
+    result = decide(
+        _finding(),
+        [_symbol("requests.sessions", kind=SymbolKind.MODULE)],
+        _context(graph),
+    )
+    assert result.status is ReachStatus.REACHABLE_CONFIRMED
