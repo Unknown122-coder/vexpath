@@ -17,6 +17,7 @@ process is bounded in both time and output size.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -100,6 +101,13 @@ class GitCommitSource:
     Never checks out a working tree: a bare fetch plus ``git show`` reads blobs
     without writing any file from the repository to disk, so nothing in the
     fetched repository can run.
+
+    With a ``cache_root``, one bare repository is kept per upstream and reused.
+    Several advisories often name commits in the same repository, and a
+    corpus-wide extraction run meets that case constantly: the second commit
+    from a repository costs an incremental fetch into an existing object store
+    rather than another clone. Without a ``cache_root`` each fetch gets a
+    throwaway directory, which is right for a one-off.
     """
 
     __slots__ = ("_cache_root", "_fetch_timeout", "_git")
@@ -118,6 +126,16 @@ class GitCommitSource:
         self._git = resolved
         self._cache_root = cache_root
         self._fetch_timeout = fetch_timeout
+        if cache_root is not None:
+            # Created once, here, rather than on first use. A cache directory
+            # that does not exist yet is the ordinary state of a fresh
+            # deployment, and discovering it one advisory at a time spends
+            # their retry budget on a configuration detail.
+            try:
+                cache_root.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                msg = f"cache root {cache_root} could not be created: {exc}"
+                raise FetchError(msg) from exc
 
     def fetch(self, reference: FixReference) -> CommitDiff:
         if reference.commit is None:
@@ -132,16 +150,109 @@ class GitCommitSource:
             msg = f"refusing to fetch from {reference.host}, which is not on the allow-list"
             raise FetchError(msg)
 
-        with tempfile.TemporaryDirectory(dir=self._cache_root) as directory:
-            workspace = Path(directory)
+        if self._cache_root is None:
+            with tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                self._prepare(workspace, reference.repository)
+                self._fetch_commit(workspace, reference.commit)
+                return self._read(workspace, reference)
+
+        workspace = self._cache_root / _repository_slug(reference.repository)
+        try:
+            self._prepare(workspace, reference.repository)
+            self._fetch_commit(workspace, reference.commit)
+            return self._read(workspace, reference)
+        except FetchError:
+            # A reused repository can be left unusable by an interrupted fetch,
+            # and every later advisory sharing it would then fail for a reason
+            # that has nothing to do with them. Discard it so the next attempt
+            # starts clean, and report this one as the failure it is.
+            shutil.rmtree(workspace, ignore_errors=True)
+            raise
+
+    def _prepare(self, workspace: Path, repository: str) -> None:
+        """Make ``workspace`` a bare repository pointing at ``repository``."""
+        workspace.mkdir(parents=True, exist_ok=True)
+        if not (workspace / "HEAD").is_file():
             self._run(["init", "--quiet", "--bare"], workspace)
-            self._run(["remote", "add", "origin", reference.repository], workspace)
-            self._run(
-                ["fetch", "--quiet", f"--depth={FETCH_DEPTH}", "origin", reference.commit],
+        # set-url rather than add, so a reused directory whose remote is
+        # already configured is not an error. The URL is re-set every time
+        # because two repositories can hash to one slug only if they are the
+        # same URL, but a redirect may have changed it upstream.
+        self._run(["remote", "remove", "origin"], workspace, allow_failure=True)
+        self._run(["remote", "add", "origin", repository], workspace)
+
+    def _fetch_commit(self, workspace: Path, commit: str) -> None:
+        """Fetch one commit and its parent, without their file contents.
+
+        ``--filter=blob:none`` is what makes this usable on a large
+        repository. A depth-2 fetch still transfers every blob in both trees,
+        which for cryptography or feast is most of the repository and timed out
+        at five minutes when measured. With the filter, only commits and trees
+        arrive, and the handful of file contents the diff actually names are
+        fetched on demand by ``git show``.
+
+        Servers that do not offer partial clone refuse the filter rather than
+        ignoring it, so the plain fetch is tried next.
+        """
+        filtered = self._run(
+            [
+                "fetch",
+                "--quiet",
+                "--filter=blob:none",
+                f"--depth={FETCH_DEPTH}",
+                "origin",
+                commit,
+            ],
+            workspace,
+            timeout=self._fetch_timeout,
+            allow_failure=True,
+        )
+        if filtered is not None:
+            return
+        self._run(
+            ["fetch", "--quiet", f"--depth={FETCH_DEPTH}", "origin", commit],
+            workspace,
+            timeout=self._fetch_timeout,
+        )
+
+    def resolve_tag(self, repository: str, tag_candidates: Sequence[str]) -> str | None:
+        """Return the commit a release tag points at, or None if none matches.
+
+        One ``ls-remote`` call, no clone. This is what turns a reference that
+        names only a fixed version into one that names a commit, and over a
+        real batch that was two advisories in five.
+
+        Candidates are tried in order because projects spell the same release
+        differently: ``1.2.3``, ``v1.2.3``, ``release-1.2.3``. Asking for all
+        of them in one call and picking the first match is cheaper than a call
+        per spelling.
+        """
+        if repository_host(repository) not in ALLOWED_HOSTS:
+            msg = f"refusing to contact {repository}, which is not on the allow-list"
+            raise FetchError(msg)
+
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            listing = self._run(
+                ["ls-remote", "--tags", "--refs", repository],
                 workspace,
                 timeout=self._fetch_timeout,
+                allow_failure=True,
             )
-            return self._read(workspace, reference)
+        if not listing:
+            return None
+
+        tags: dict[str, str] = {}
+        for line in listing.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].startswith("refs/tags/"):
+                tags[parts[1].removeprefix("refs/tags/")] = parts[0]
+
+        for candidate in tag_candidates:
+            if candidate in tags:
+                return tags[candidate]
+        return None
 
     def _read(self, workspace: Path, reference: FixReference) -> CommitDiff:
         commit = reference.commit or "FETCH_HEAD"
@@ -164,6 +275,10 @@ class GitCommitSource:
             timeout=DIFF_TIMEOUT_SECONDS,
             allow_failure=True,
         )
+        # A commit whose parent is unreachable at this depth produces no diff
+        # rather than an error, and so does a failed diff. Both mean there is
+        # nothing to read, which the caller reports as no symbols found.
+        diff = diff or ""
         if len(diff) > MAX_DIFF_BYTES:
             notes.append(
                 f"the diff is {len(diff)} bytes, above the {MAX_DIFF_BYTES} byte "
@@ -221,7 +336,7 @@ class GitCommitSource:
         *,
         timeout: int = DIFF_TIMEOUT_SECONDS,
         allow_failure: bool = False,
-    ) -> str:
+    ) -> str | None:
         try:
             completed = subprocess.run(  # noqa: S603 - fixed binary, no shell
                 [self._git, *arguments],
@@ -243,12 +358,45 @@ class GitCommitSource:
 
         if completed.returncode != 0:
             if allow_failure:
-                return ""
+                # None, not "": a quiet command that succeeded also prints
+                # nothing, and a caller choosing a fallback has to tell the two
+                # apart.
+                return None
             detail = (completed.stderr or completed.stdout).strip().splitlines()
             first = detail[0] if detail else "no output"
             msg = f"git {arguments[0]} failed: {first}"
             raise FetchError(msg)
         return completed.stdout
+
+
+def repository_host(repository: str) -> str:
+    """The host part of a repository URL, for the allow-list check."""
+    without_scheme = repository.removeprefix("https://").removeprefix("http://")
+    return without_scheme.split("/", 1)[0].lower()
+
+
+def _repository_slug(repository: str) -> str:
+    """A filesystem-safe directory name for one repository URL.
+
+    The readable part is kept for someone looking at the cache directory, and
+    a hash of the full URL is appended so two upstreams that differ only in a
+    stripped character cannot share an object store.
+    """
+    # Normalised before hashing, so the same upstream written two ways shares
+    # one object store instead of being cloned twice.
+    normalised = (
+        repository.strip()
+        .lower()
+        .removeprefix("https://")
+        .removeprefix("http://")
+        .removesuffix("/")
+        .removesuffix(".git")
+    )
+    readable = "".join(
+        character if character.isalnum() or character in "-_." else "-" for character in normalised
+    ).strip("-")[:60]
+    digest = hashlib.sha256(normalised.encode("utf-8")).hexdigest()[:12]
+    return f"{readable}-{digest}" if readable else digest
 
 
 @dataclass(frozen=True, slots=True)

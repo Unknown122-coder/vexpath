@@ -13,7 +13,7 @@ snapshot can be inspected before it is trusted.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy import Engine
@@ -29,6 +29,13 @@ log = get_logger(__name__)
 #: reported loudly rather than buried in a metric nobody reads.
 SYMBOL_COVERAGE_FLOOR = 0.50
 
+#: Ecosystems with fewer advisories than this are not measured against the
+#: floor. A PyPI download legitimately carries a handful of advisories that
+#: also affect Maven or Hex, because one project ships bindings for several
+#: languages. One advisory with no symbols is 0 % coverage, and warning about
+#: it teaches people to ignore the warning that matters.
+MIN_ADVISORIES_TO_JUDGE = 100
+
 
 @dataclass(frozen=True, slots=True)
 class SyncJobReport:
@@ -39,16 +46,48 @@ class SyncJobReport:
     symbol_coverage: dict[str, float]
     skipped: int
     loaded: SeedReport | None
+    #: The ecosystems the run was asked for. A download of one ecosystem also
+    #: carries advisories that happen to affect others, and those are not what
+    #: the run was measuring.
+    requested: tuple[str, ...] = ()
+    #: Advisory count per ecosystem, for deciding whether a ratio means
+    #: anything.
+    advisory_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def coverage_concerns(self) -> tuple[str, ...]:
-        """Ecosystems whose symbol coverage is below the usable floor."""
-        return tuple(
-            f"{ecosystem} symbol coverage is {share:.1%}, below the "
-            f"{SYMBOL_COVERAGE_FLOOR:.0%} floor"
-            for ecosystem, share in sorted(self.symbol_coverage.items())
-            if share < SYMBOL_COVERAGE_FLOOR
-        )
+        """Ecosystems whose symbol coverage is below the usable floor.
+
+        Only the ecosystems this run asked for, and only those with enough
+        advisories for a ratio to mean anything. A warning that fires on every
+        run, for ecosystems nobody requested, is a warning people learn to
+        scroll past.
+        """
+        wanted = {name.casefold() for name in self.requested}
+        concerns: list[str] = []
+        for ecosystem, share in sorted(self.symbol_coverage.items()):
+            if wanted and ecosystem.casefold() not in wanted:
+                continue
+            total = self.advisory_counts.get(ecosystem, 0)
+            if total < MIN_ADVISORIES_TO_JUDGE:
+                continue
+            if share >= SYMBOL_COVERAGE_FLOOR:
+                continue
+            if share == 0.0:
+                # The ordinary state of a freshly downloaded corpus: symbols
+                # come from extraction, which is a separate job. Saying the
+                # product's central claim is in question would be wrong.
+                concerns.append(
+                    f"{ecosystem} has no extracted symbols yet across "
+                    f"{total} advisories, so nothing can be cleared. Run "
+                    f"'vexpath-worker extract-symbols' to populate them."
+                )
+            else:
+                concerns.append(
+                    f"{ecosystem} symbol coverage is {share:.1%} across {total} "
+                    f"advisories, below the {SYMBOL_COVERAGE_FLOOR:.0%} floor"
+                )
+        return tuple(concerns)
 
     def summary_line(self) -> str:
         parts = [f"snapshot {self.snapshot_id}", f"{self.advisories} advisories"]
@@ -98,6 +137,11 @@ def refresh_advisories(
         symbol_coverage=coverage,
         skipped=len(report.skipped),
         loaded=loaded,
+        requested=tuple(ecosystems),
+        advisory_counts={
+            name: int(counts.get("advisories", 0))
+            for name, counts in report.snapshot.counts.items()
+        },
     )
 
     for concern in job_report.coverage_concerns:
@@ -109,4 +153,9 @@ def refresh_advisories(
     return job_report
 
 
-__all__ = ["SYMBOL_COVERAGE_FLOOR", "SyncJobReport", "refresh_advisories"]
+__all__ = [
+    "MIN_ADVISORIES_TO_JUDGE",
+    "SYMBOL_COVERAGE_FLOOR",
+    "SyncJobReport",
+    "refresh_advisories",
+]

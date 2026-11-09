@@ -139,6 +139,33 @@ class Advisory(Base):
     #: SHA-256 of the normalised source record, for change detection on sync.
     source_sha256: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _malware_has_no_symbols_to_extract(cls, data: object) -> object:
+        """A malicious-package record is never awaiting symbol extraction.
+
+        There is no fix to diff, because there is no fix: the remedy is to
+        remove the package, not to upgrade it. Leaving such a record
+        ``pending`` puts it in the extraction queue, and on the real corpus
+        that is 12,003 of 19,552 PyPI records, all modified more recently than
+        the real advisories and so sorting ahead of them. Every batch would
+        otherwise be spent discovering that a record with no fix has no fix.
+
+        Settled here rather than in the queue so the fact travels with the
+        record into any database or snapshot that stores it. Runs before
+        validation because the model is frozen, so the value has to be right
+        on the way in.
+        """
+        if not isinstance(data, dict):
+            return data
+        identifiers = [data.get("id") or "", *(data.get("aliases") or ())]
+        if not any(str(name).upper().startswith("MAL-") for name in identifiers):
+            return data
+        status = data.get("symbols_status", SymbolsStatus.PENDING)
+        if SymbolsStatus(status) is SymbolsStatus.PENDING:
+            return {**data, "symbols_status": SymbolsStatus.NONE}
+        return data
+
     @field_validator("affected", mode="after")
     @classmethod
     def _one_entry_per_package(

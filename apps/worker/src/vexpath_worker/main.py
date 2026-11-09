@@ -164,6 +164,18 @@ def extract_symbols_command(
             ),
         ),
     ] = None,
+    advisory: Annotated[
+        str | None,
+        typer.Option(
+            "--advisory",
+            "-a",
+            help=(
+                "Comma-separated advisory identifiers to work on, instead of "
+                "taking the next batch off the queue. This is how one advisory "
+                "is re-extracted after the builder improves."
+            ),
+        ),
+    ] = None,
     show_backlog: Annotated[
         bool,
         typer.Option("--backlog/--no-backlog", help="Print what is still waiting afterwards."),
@@ -185,9 +197,16 @@ def extract_symbols_command(
     """
     settings = get_settings()
     configure_logging(settings)
+    named = [entry.strip() for entry in (advisory or "").split(",") if entry.strip()]
     engine = create_sync_engine(settings.database_url)
     try:
-        report = extract_symbols(engine, ecosystem=ecosystem, batch=batch, cache_root=cache_root)
+        report = extract_symbols(
+            engine,
+            ecosystem=ecosystem,
+            batch=batch,
+            advisory_ids=named or None,
+            cache_root=cache_root,
+        )
         typer.echo(report.summary_line())
         if show_backlog:
             backlog = extraction_backlog(engine, ecosystem=ecosystem)

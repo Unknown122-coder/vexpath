@@ -155,14 +155,76 @@ Writing this command found two wrong statements in the reachable explanation: a
 path of five symbols was described as five calls rather than four, and a symbol
 that is itself an entry point was described as being called from itself.
 
+### Done: the extraction job, and what the real corpus taught it
+
+`vexpath-worker extract-symbols` walks the advisories awaiting symbols,
+fetches each fix commit, and stores what the diff changed. It is a
+network-bound crawl over tens of thousands of repositories, so it is built to
+be stopped rather than to finish: each advisory's outcome is committed as it is
+decided, advisories are grouped by repository so several sharing one reuse a
+single bare repository, and attempts are counted and capped at three. A fix
+commit in a deleted repository fails identically forever, and without the cap
+it would be retried on every run while advisories never tried once waited
+behind it.
+
+Running it against 19,548 real PyPI advisories found five things that no
+fixture would have.
+
+- **An advisory can carry two `affected` entries for the same package**, one
+  enumerating versions and one giving a range. CVE-2014-3555 does this for
+  `neutron`. Matching evaluates the first entry that names a package and never
+  looks at the rest, so versions covered only by the second produced no finding
+  at all, silently. Now an invariant on the `Advisory` model, so a snapshot
+  from an older build is corrected on the way in.
+- **12,003 of the 19,552 records are malicious-package records**, and they are
+  the most recently modified, so they sorted to the front of the queue. Every
+  batch would have been spent discovering that a record with no fix has no fix.
+  They never enter the queue now.
+- **A snapshot's content hash covers the normalised records**, so improving
+  normalisation changes the hash of a corpus whose bytes never moved. Reported
+  as corruption, which is what happened, that sends a reader hunting for damage
+  that is not there. Snapshots record the build that normalised them.
+- **The commit cache was only a scratch directory.** Advisories were grouped by
+  repository for reuse that did not exist, since each fetch got a throwaway
+  bare repository. One repository per upstream is now kept and reused, and a
+  reused repository left unusable by an interrupted fetch is discarded rather
+  than failing every later advisory that shares it.
+- **The symbol-coverage floor warned on every sync.** Coverage is 0 % for a
+  freshly downloaded corpus because symbols come from extraction, which is a
+  separate job, and the warning said the product's central claim was in
+  question. It now says what to run, ignores ecosystems the run did not ask
+  for, and ignores denominators too small to mean anything.
+
+A sixth thing came out of the first successful run. Two advisories timed out
+at five minutes fetching `cryptography` and `feast`, because a depth-2 fetch
+still transfers every blob in both trees even though only the handful of files
+the diff names are ever read. Fetching with `--filter=blob:none` and letting
+`git show` pull the contents it needs brought those two from two timeouts to
+twenty seconds for the pair, with fifteen symbols extracted. Servers without
+partial clone refuse the filter rather than ignoring it, so the plain fetch
+follows.
+
+Nothing fetched is ever executed: a bare repository, no checkout, hooks and
+inherited configuration disabled, and the diff read as text.
+
+Two advisories in five carried only a release tag rather than a commit.
+`GitCommitSource.resolve_tag` turns a tag into a commit in one `ls-remote`
+call and is tested, but it is deliberately not wired into extraction yet. A
+release tag's commit is the release, so diffing it against its parent would
+describe whatever that one commit changed rather than the fix, and symbols for
+the wrong code are exactly what drives a wrong verdict. Doing it correctly
+means diffing the previous release tag against the fixed one, which is the
+`tag_diff` symbol source the design reserves for it, at low confidence.
+That is the next piece of extraction work.
+
 ### Remaining
 
-- The `advisory.patchdiff` worker job, wiring extraction into the sync pipeline
-  and storing symbols in the database.
 - Dependency graphs from downloaded archives, for packages a scan's environment
   does not have installed.
 - EPSS and CISA KEV enrichment, carried from M1.
 - The benchmark over 30 real repositories.
+- Scheduling extraction in the reference deployment, which waits for M4: the
+  sync workflow publishes a snapshot and has no database to extract into.
 
 ### Original plan, for reference
 

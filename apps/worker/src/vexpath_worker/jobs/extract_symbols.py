@@ -104,6 +104,7 @@ def extract_symbols(
     *,
     ecosystem: str = "PyPI",
     batch: int = DEFAULT_BATCH,
+    advisory_ids: Sequence[str] | None = None,
     source: CommitSource | None = None,
     cache_root: Path | None = None,
 ) -> ExtractReport:
@@ -115,6 +116,12 @@ def extract_symbols(
             because symbol names are ecosystem-specific and the extractor is
             Python-only (ADR-0012).
         batch: How many advisories to attempt in this run.
+        advisory_ids: Work only on these advisories, instead of taking the
+            next batch off the queue. This is how a specific advisory is
+            re-extracted after the builder improves, and how a report of a
+            wrong symbol is investigated. The retry cap and the other queue
+            rules still apply, so a named advisory that has already been given
+            up on stays given up on.
         source: Where commits come from. Defaults to fetching over the network.
             Injected so tests run offline against recorded diffs.
         cache_root: Where bare repositories are kept between fetches, so that
@@ -128,7 +135,7 @@ def extract_symbols(
     commit_source = source if source is not None else GitCommitSource(cache_root=cache_root)
     report = ExtractReport()
 
-    queued = _claim(engine, ecosystem=ecosystem, batch=batch)
+    queued = _claim(engine, ecosystem=ecosystem, batch=batch, advisory_ids=advisory_ids)
     if not queued:
         log.info("advisory.patchdiff.idle", ecosystem=ecosystem)
         return report
@@ -194,7 +201,13 @@ def _by_repository(queued: Sequence[Advisory]) -> Iterator[tuple[str, list[Advis
         yield repository, grouped[repository]
 
 
-def _claim(engine: Engine, *, ecosystem: str, batch: int) -> list[Advisory]:
+def _claim(
+    engine: Engine,
+    *,
+    ecosystem: str,
+    batch: int,
+    advisory_ids: Sequence[str] | None = None,
+) -> list[Advisory]:
     """Read the next advisories needing extraction.
 
     Ordered by attempt count so nothing is tried a second time while something
@@ -208,6 +221,7 @@ def _claim(engine: Engine, *, ecosystem: str, batch: int) -> list[Advisory]:
     # are read. Selecting both at once would return one row per affected
     # package, and an advisory affecting four packages would fill four of the
     # batch's slots and be extracted four times.
+    restricted = [advisories.c.id.in_(list(advisory_ids))] if advisory_ids is not None else []
     chosen = (
         select(advisories.c.id)
         .select_from(
@@ -215,10 +229,16 @@ def _claim(engine: Engine, *, ecosystem: str, batch: int) -> list[Advisory]:
         )
         .where(
             and_(
+                *restricted,
                 advisory_affected.c.ecosystem == ecosystem,
                 advisories.c.withdrawn_at.is_(None),
                 advisories.c.symbols_status.in_([status.value for status in RETRYABLE]),
                 advisories.c.symbols_attempts < MAX_ATTEMPTS,
+                # Malicious-package records have no fix to diff. Advisories
+                # loaded by a build that did not record that are skipped here
+                # rather than being rediscovered one network round trip at a
+                # time.
+                advisories.c.id.not_like("MAL-%"),
             )
         )
         .group_by(advisories.c.id, advisories.c.symbols_attempts, advisories.c.modified_at)
@@ -403,12 +423,15 @@ def _record(
         )
 
 
-def extraction_backlog(engine: Engine, *, ecosystem: str = "PyPI") -> dict[str, int]:
+def extraction_backlog(
+    engine: Engine, *, ecosystem: str = "PyPI", advisory_ids: Sequence[str] | None = None
+) -> dict[str, int]:
     """Count what is waiting, what is done, and what was given up on.
 
     The ratio of ``extracted`` to the rest is the number the product's
     usefulness rests on, so it is cheap to ask for and reported by the job.
     """
+    restricted = [advisories.c.id.in_(list(advisory_ids))] if advisory_ids is not None else []
     query = (
         select(
             advisories.c.symbols_status,
@@ -419,6 +442,7 @@ def extraction_backlog(engine: Engine, *, ecosystem: str = "PyPI") -> dict[str, 
         )
         .where(
             and_(
+                *restricted,
                 advisory_affected.c.ecosystem == ecosystem,
                 advisories.c.withdrawn_at.is_(None),
             )
@@ -437,6 +461,7 @@ def extraction_backlog(engine: Engine, *, ecosystem: str = "PyPI") -> dict[str, 
         )
         .where(
             and_(
+                *restricted,
                 advisory_affected.c.ecosystem == ecosystem,
                 advisories.c.symbols_status.in_([status.value for status in RETRYABLE]),
                 advisories.c.symbols_attempts >= MAX_ATTEMPTS,

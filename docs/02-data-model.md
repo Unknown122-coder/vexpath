@@ -51,7 +51,22 @@ One row per deduplicated advisory. Aliases collapse to a single primary id (pref
 | references | jsonb | `[{type, url}]` as in OSV |
 | repo_url | text null | upstream repository inferred from references/ranges |
 | symbols_status | text | `pending` / `extracted` / `derived_from_tags` / `none` / `failed` |
+| symbols_detail | text null | why extraction ended where it did, in plain language |
+| symbols_attempts | smallint | extraction reaches the network, so attempts are counted and capped |
+| symbols_attempted_at | timestamptz null | |
 | source_hash | text | hash of the normalised source record, for change detection |
+
+Partial index `(symbols_attempts, modified_at) WHERE symbols_status IN
+('pending', 'failed')` is the extraction work queue. Most rows leave it
+permanently once extracted, so indexing only the ones still waiting keeps it
+small as the corpus grows.
+
+`symbols_status = 'none'` is terminal: extraction ran and legitimately found
+nothing, such as a data-only fix or a malicious-package record. Only `pending`
+and `failed` are retried, and only while `symbols_attempts` is below the cap. A
+fix commit in a deleted repository fails identically forever, and without the
+cap it would be retried on every run while advisories never tried once waited
+behind it.
 
 ### `advisory_affected`
 Affected package ranges. One advisory may affect several packages.
@@ -81,12 +96,17 @@ Functions/methods/classes modified by an advisory's fix. The heart of reachabili
 | symbol | text | fully qualified: `requests.adapters.HTTPAdapter.send` |
 | file_path | text | path in upstream repo at fix commit |
 | kind | text | `function` / `method` / `class` / `module` |
-| source | text | `fix_commit` / `tag_diff` / `curated` / `osv_ecosystem_specific` |
+| source | text | `fix_commit` / `tag_diff` / `curated` / `osv_ecosystem_specific` / `manual` |
 | fix_commit | text null | sha |
 | confidence | text | `high` (direct hunk inside body) / `medium` (signature or decorator changed) / `low` (file-level only, tag diff) |
 | created_at | timestamptz | |
 
-Unique: `(advisory_id, package_name, symbol)`. Curated overrides (`source = 'curated'`) win over extracted ones and are maintained in-repo as YAML in `testdata/advisories/curated/`.
+Unique: `(advisory_id, package_name, symbol)`. Curated overrides (`source = 'curated'`) win over extracted ones and are maintained in-repo as YAML in `testdata/advisories/curated/`. Re-extraction replaces a symbol's row rather than duplicating it: a better builder may read different symbols out of the same diff.
+
+`source = 'manual'` is a symbol an operator named during triage, for an
+advisory with no recoverable fix commit. It is the least trustworthy
+provenance, not because the person is likely wrong but because nothing checked
+them, and it carries low confidence for that reason.
 
 ### `advisory_snapshots`
 Immutable record of the advisory corpus at a point in time so scans are reproducible.
@@ -96,8 +116,14 @@ Immutable record of the advisory corpus at a point in time so scans are reproduc
 | id | text PK | |
 | created_at | timestamptz | |
 | content_hash | text | hash over all `advisories.source_hash` sorted |
+| core_version | text null | the build that normalised these records |
 | ecosystems | text[] | |
 | counts | jsonb | per ecosystem: advisories, with_symbols |
+
+The content hash covers the *normalised* records, not the bytes OSV served, so
+improving normalisation changes the hash of a corpus that never moved. Without
+`core_version` that is indistinguishable from corruption, and reporting it as
+corruption sends a reader hunting for damage that is not there.
 
 ### `package_callgraphs`
 Cache index for dependency call graphs stored in object storage.

@@ -18,6 +18,8 @@ Two asymmetries recur and are each tested directly:
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
@@ -749,3 +751,137 @@ def test_the_build_configuration_from_the_commit_is_used() -> None:
     assert result.succeeded
     assert "mystery.core" in {symbol.symbol for symbol in result.symbols}
     assert result.best_confidence is Confidence.HIGH
+
+
+# --- Fetching: tags and partial clones -------------------------------------
+
+
+def _patched_git(
+    monkeypatch: pytest.MonkeyPatch, answers: dict[str, str | None]
+) -> tuple[object, list[list[str]]]:
+    """A GitCommitSource whose git invocations are answered from a table.
+
+    The parsing and the fallback are what is under test; running git against a
+    real remote would make these depend on the network and on another
+    project's tags. Patched on the class because instances use ``__slots__``.
+    """
+    from vexpath_core.patchdiff.fetch import GitCommitSource
+
+    calls: list[list[str]] = []
+
+    def fake_run(
+        self: object,
+        arguments: Sequence[str],
+        workspace: Path,
+        *,
+        timeout: int = 0,
+        allow_failure: bool = False,
+    ) -> str | None:
+        calls.append(list(arguments))
+        return answers.get(arguments[0], "")
+
+    monkeypatch.setattr(GitCommitSource, "_run", fake_run)
+    return GitCommitSource(git="git"), calls
+
+
+def test_a_release_tag_resolves_to_its_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    listing = "\n".join(
+        [
+            "1111111111111111111111111111111111111111\trefs/tags/v1.2.2",
+            "2222222222222222222222222222222222222222\trefs/tags/v1.2.3",
+            "3333333333333333333333333333333333333333\trefs/tags/1.2.3",
+        ]
+    )
+    source, _ = _patched_git(monkeypatch, {"ls-remote": listing})
+    # The first candidate that exists wins: projects spell one release several
+    # ways, and the caller states its preference by ordering them.
+    assert source.resolve_tag("https://github.com/psf/requests", ["v1.2.3", "1.2.3"]) == "2" * 40
+    assert source.resolve_tag("https://github.com/psf/requests", ["1.2.3", "v1.2.3"]) == "3" * 40
+
+
+def test_an_absent_tag_resolves_to_nothing_rather_than_guessing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, _ = _patched_git(
+        monkeypatch,
+        {"ls-remote": "1111111111111111111111111111111111111111\trefs/tags/v9.9.9"},
+    )
+    assert source.resolve_tag("https://github.com/psf/requests", ["v1.2.3"]) is None
+
+
+def test_resolving_a_tag_refuses_a_host_off_the_allow_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repository URL comes from advisory data, which is attacker-influenced."""
+    from vexpath_core.patchdiff.fetch import FetchError
+
+    source, calls = _patched_git(monkeypatch, {})
+    with pytest.raises(FetchError, match="allow-list"):
+        source.resolve_tag("https://evil.example/x/y", ["v1"])
+    assert calls == [], "nothing should be contacted"
+
+
+def test_a_fetch_prefers_a_blobless_clone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A depth-2 fetch still transfers every blob in both trees.
+
+    Measured on cryptography and feast, that timed out at five minutes. Only
+    the handful of files the diff names are ever read, so their contents are
+    fetched on demand instead.
+    """
+    source, calls = _patched_git(monkeypatch, {"fetch": ""})
+    source._fetch_commit(Path(), "a" * 40)
+
+    fetches = [call for call in calls if call[0] == "fetch"]
+    assert len(fetches) == 1
+    assert "--filter=blob:none" in fetches[0]
+
+
+def test_a_server_without_partial_clone_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Servers refuse an unsupported filter rather than ignoring it."""
+    from vexpath_core.patchdiff.fetch import GitCommitSource
+
+    attempts: list[list[str]] = []
+
+    def fake_run(
+        self: object,
+        arguments: Sequence[str],
+        workspace: Path,
+        *,
+        timeout: int = 0,
+        allow_failure: bool = False,
+    ) -> str | None:
+        attempts.append(list(arguments))
+        return None if "--filter=blob:none" in arguments else ""
+
+    monkeypatch.setattr(GitCommitSource, "_run", fake_run)
+    GitCommitSource(git="git")._fetch_commit(Path(), "a" * 40)
+
+    assert len(attempts) == 2
+    assert "--filter=blob:none" not in attempts[1]
+
+
+def test_a_cache_root_is_created_rather_than_discovered_missing(tmp_path: Path) -> None:
+    """A cache directory that does not exist yet is a fresh deployment.
+
+    Discovering it one advisory at a time spent their retry budget on a
+    configuration detail, which is how this was found.
+    """
+    from vexpath_core.patchdiff.fetch import GitCommitSource
+
+    root = tmp_path / "nested" / "cache"
+    GitCommitSource(git="git", cache_root=root)
+    assert root.is_dir()
+
+
+def test_each_repository_gets_its_own_cache_directory() -> None:
+    from vexpath_core.patchdiff.fetch import _repository_slug
+
+    one = _repository_slug("https://github.com/psf/requests")
+    two = _repository_slug("https://github.com/psf/requests.git")
+    three = _repository_slug("https://github.com/urllib3/urllib3")
+
+    # Readable, so a person looking at the cache can tell what is in it.
+    assert one.startswith("github.com-psf-requests")
+    assert one != three
+    # The .git suffix names the same upstream, so it shares the object store.
+    assert one == two
