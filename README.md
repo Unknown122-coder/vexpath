@@ -10,9 +10,9 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
 > project and its installed dependencies, searches for each advisory's
 > vulnerable symbols, and clears a finding only when no path reaches them.
-> Symbols come from the advisory's fix commit. What remains in this milestone
-> is the `vexpath reach` triage command, the worker that stores extracted
-> symbols, and the benchmark over 30 real repositories. See
+> Symbols come from the advisory's fix commit, and `vexpath reach` explains any
+> single verdict in full. What remains in this milestone is the worker that
+> stores extracted symbols, and the benchmark over 30 real repositories. See
 > [docs/05-roadmap.md](docs/05-roadmap.md).
 
 ## Quick start
@@ -28,6 +28,9 @@ uv run vexpath scan testdata/repos/direct-call
 # Or download a current corpus first, then scan your own project.
 uv run vexpath advisory sync var/advisories
 uv run vexpath scan . --snapshot var/advisories
+
+# Disagree with a verdict? Make it show its work, one advisory at a time.
+uv run vexpath reach . --advisory CVE-2024-35195 --snapshot var/advisories
 
 make up                            # Postgres, migrations, API and seeded advisories
 curl localhost:8000/healthz

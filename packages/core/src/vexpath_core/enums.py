@@ -191,6 +191,11 @@ class SymbolSource(StrEnum):
     OSV_ECOSYSTEM_SPECIFIC = "osv_ecosystem_specific"
     #: Derived by diffing release tags because no fix commit was available.
     TAG_DIFF = "tag_diff"
+    #: Named by an operator during triage. Least trustworthy of all, not
+    #: because the person is wrong but because nothing checked them: no fix
+    #: commit was consulted, so the tool cannot confirm the symbol is the
+    #: vulnerable one. Never produced by automated extraction.
+    MANUAL = "manual"
 
 
 class SymbolsStatus(StrEnum):

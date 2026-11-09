@@ -18,6 +18,10 @@ from vexpath.main import app
 
 runner = CliRunner()
 
+#: Written out rather than escaped inline, so generated metadata files are
+#: readable in this source.
+NEWLINE = chr(10)
+
 
 @pytest.fixture
 def env(snapshot_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,6 +299,157 @@ def test_scan_can_analyse_a_supplied_sbom(env: None, sboms_dir: Path, tmp_path: 
     )
     assert result.exit_code == 0
     assert "urllib3" in result.stdout
+
+
+# --- reach -----------------------------------------------------------------
+
+
+def _synthetic_environment(fixture_repos_dir: Path, tmp_path: Path, fixture: str) -> Path:
+    """Lay out the fixture's vendored dependencies as an installed environment."""
+    import shutil
+
+    site_packages = tmp_path / "env" / "Lib" / "site-packages"
+    site_packages.mkdir(parents=True, exist_ok=True)
+    vendor = fixture_repos_dir / fixture / "vendor"
+    for distribution, version, import_name in (
+        ("requests", "2.31.0", "requests"),
+        ("urllib3", "1.26.17", "urllib3"),
+    ):
+        source = vendor / import_name
+        if not source.is_dir():
+            continue
+        shutil.copytree(source, site_packages / import_name)
+        info = site_packages / f"{distribution}-{version}.dist-info"
+        info.mkdir(exist_ok=True)
+        (info / "METADATA").write_text(
+            f"Name: {distribution}" + NEWLINE + f"Version: {version}" + NEWLINE,
+            encoding="utf-8",
+        )
+        (info / "top_level.txt").write_text(import_name + NEWLINE, encoding="utf-8")
+    return tmp_path / "env"
+
+
+def test_reach_explains_a_reachable_advisory(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    environment = _synthetic_environment(fixture_repos_dir, tmp_path, "direct-call")
+    result = runner.invoke(
+        app,
+        [
+            "reach",
+            str(fixture_repos_dir / "direct-call"),
+            "--advisory",
+            "CVE-2024-35195",
+            "--environment",
+            str(environment),
+            "--no-cache",
+        ],
+    )
+    # A reachable verdict is the actionable one, so it is distinguishable
+    # without parsing the output.
+    assert result.exit_code == int(ExitCode.POLICY_FAILED)
+    assert "reachable_confirmed" in result.stdout
+    assert "requests.sessions.Session.send" in result.stdout
+    assert "Entry points" in result.stdout
+    assert "Graph the answer rests on" in result.stdout
+
+
+def test_reach_explains_a_cleared_advisory_and_exits_zero(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    environment = _synthetic_environment(fixture_repos_dir, tmp_path, "unused-transitive")
+    result = runner.invoke(
+        app,
+        [
+            "reach",
+            str(fixture_repos_dir / "unused-transitive"),
+            "--advisory",
+            "CVE-2023-45803",
+            "--environment",
+            str(environment),
+            "--no-cache",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "not_affected" in result.stdout
+    assert "unreachable" in result.stdout
+    assert "No path from" in result.stdout
+
+
+def test_reach_json_output_carries_the_evidence(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    environment = _synthetic_environment(fixture_repos_dir, tmp_path, "direct-call")
+    result = runner.invoke(
+        app,
+        [
+            "reach",
+            str(fixture_repos_dir / "direct-call"),
+            "--advisory",
+            "CVE-2024-35195",
+            "--environment",
+            str(environment),
+            "--no-cache",
+            "--format",
+            "json",
+        ],
+    )
+    payload = json.loads(result.stdout)
+    assert payload["advisory"]["id"] == "CVE-2024-35195"
+    assert payload["component"]["name"] == "requests"
+    assert payload["verdict"] == "affected"
+    assert payload["reproducible"] is True
+    assert payload["reach"]["status"] == "reachable_confirmed"
+    assert payload["symbols"], "the symbols searched for belong in the payload"
+    reaching = [
+        entry for entry in payload["entry_points"]["examined"] if entry["status"] != "unreached"
+    ]
+    assert reaching and len(reaching[0]["path"]) >= 4
+
+
+def test_reach_rejects_an_advisory_that_does_not_apply(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    environment = _synthetic_environment(fixture_repos_dir, tmp_path, "direct-call")
+    result = runner.invoke(
+        app,
+        [
+            "reach",
+            str(fixture_repos_dir / "direct-call"),
+            "--advisory",
+            "CVE-9999-00001",
+            "--environment",
+            str(environment),
+            "--no-cache",
+        ],
+    )
+    assert result.exit_code == int(ExitCode.ANALYSIS_ERROR)
+    assert "no advisory matching" in result.stderr
+
+
+def test_reach_accepts_symbols_by_hand(env: None, fixture_repos_dir: Path, tmp_path: Path) -> None:
+    environment = _synthetic_environment(fixture_repos_dir, tmp_path, "unused-transitive")
+    result = runner.invoke(
+        app,
+        [
+            "reach",
+            str(fixture_repos_dir / "unused-transitive"),
+            "--advisory",
+            "CVE-2023-45803",
+            "--environment",
+            str(environment),
+            "--no-cache",
+            "--symbol",
+            "app.compute.mean",
+        ],
+    )
+    assert "from manual" in result.stdout
+    assert "command line" in result.stdout
+
+
+def test_reach_requires_an_advisory() -> None:
+    result = runner.invoke(app, ["reach", "."])
+    assert result.exit_code != 0
 
 
 def test_scan_rejects_an_unreadable_snapshot(fixture_repos_dir: Path, tmp_path: Path) -> None:

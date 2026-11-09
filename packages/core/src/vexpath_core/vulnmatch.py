@@ -104,7 +104,7 @@ def match(
     behind: dict[str, Advisory] = {}
     for component in components:
         for advisory in candidates.get(component.purl, ()):
-            finding = _finding_for(component, advisory)
+            finding = finding_for(component, advisory)
             if finding is not None:
                 findings.append(finding)
                 behind[finding.id] = advisory
@@ -129,7 +129,7 @@ def match(
     )
 
 
-def _finding_for(component: Component, advisory: Advisory) -> Finding | None:
+def finding_for(component: Component, advisory: Advisory) -> Finding | None:
     """Build a finding for one component and advisory, or None if unaffected."""
     if advisory.is_withdrawn:
         # The database has concluded this advisory was wrong. Reporting it is
@@ -209,6 +209,34 @@ def _build(
     )
 
 
+def probe_finding(component: Component, advisory: Advisory) -> Finding:
+    """Build a finding for a component the advisory does not currently affect.
+
+    Used only by triage, to answer "would this reach my code if I were on an
+    affected version". It never enters a scan's finding set, and it is created
+    as ``under_investigation`` rather than ``affected`` so that it cannot be
+    mistaken for a real match if it ever leaks into one.
+
+    Raises:
+        ValueError: if the advisory has no entry for this component's package,
+            in which case there is nothing to probe.
+    """
+    package = _affected_package_for(advisory, component)
+    if package is None:
+        msg = f"{advisory.id} has no affected entry for {component.purl}"
+        raise ValueError(msg)
+    return _build(
+        component,
+        advisory,
+        package,
+        verdict=Verdict.UNDER_INVESTIGATION,
+        notes=(
+            f"{component.name} {component.version} is outside this advisory's "
+            f"affected range; this record exists only to explain reachability.",
+        ),
+    )
+
+
 def _affected_package_for(advisory: Advisory, component: Component) -> AffectedPackage | None:
     """Find the advisory's entry for this component's package.
 
@@ -251,4 +279,10 @@ def summarise_by_severity(findings: Sequence[Finding]) -> dict[Severity, int]:
     return counts
 
 
-__all__ = ["MatchReport", "match", "summarise_by_severity"]
+__all__ = [
+    "MatchReport",
+    "finding_for",
+    "match",
+    "probe_finding",
+    "summarise_by_severity",
+]

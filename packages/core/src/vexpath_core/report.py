@@ -13,11 +13,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from vexpath_core.enums import ReachStatus, Severity, Verdict
+from vexpath_core.enums import EntryPointSource, ReachStatus, Severity, Verdict
 from vexpath_core.models.finding import Finding
 from vexpath_core.models.results import ScanResults
+
+if TYPE_CHECKING:
+    # Imported for annotations only. At runtime this module must not depend on
+    # the triage orchestrator, which reaches back into scanning and would make
+    # rendering part of an import cycle.
+    from vexpath_core.triage import TriageReport
 
 #: Column widths for the terminal table. Severity and verdict are fixed-width
 #: vocabularies, so the table does not need to measure them.
@@ -368,6 +374,177 @@ def _severity_fallback_score(severity: Severity) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Triage, for explaining one advisory
+# ---------------------------------------------------------------------------
+
+
+def render_triage(report: TriageReport) -> str:
+    """Render a triage report for a terminal.
+
+    Ordered the way the question is actually asked: the answer first, then the
+    evidence for it, then the reasons it might be wrong. A reader who stops
+    after the first screen should still have the right conclusion.
+    """
+    lines = [
+        f"{report.advisory_id}  {report.severity.value}",
+    ]
+    if report.summary:
+        lines.append(f"  {report.summary}")
+    if report.aliases:
+        lines.append(f"  also known as {', '.join(report.aliases)}")
+    lines.append("")
+
+    component = report.component
+    lines.append(f"{'package':<16}{component.name} {component.version} ({component.ecosystem})")
+    lines.append(f"{'dependency':<16}{'direct' if component.direct else 'transitive'}")
+    lines.append(
+        f"{'version':<16}"
+        + (
+            "inside this advisory's affected range"
+            if report.version_affected
+            else "outside this advisory's affected range"
+        )
+    )
+    lines.append(f"{'verdict':<16}{_triage_verdict(report)}")
+    lines.append(
+        f"{'corpus':<16}"
+        + (
+            f"snapshot {report.snapshot_id}"
+            if report.snapshot_id
+            else "queried live, so this report is not reproducible"
+        )
+    )
+    lines.append("")
+
+    if report.reach is not None and report.reach.explanation:
+        lines.append(report.reach.explanation)
+        lines.append("")
+
+    lines.extend(_triage_symbols(report))
+    lines.extend(_triage_entry_points(report))
+    lines.extend(_triage_graph(report))
+
+    if report.notes:
+        lines.append("Caveats")
+        lines.extend(f"  - {note}" for note in report.notes)
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _triage_verdict(report: TriageReport) -> str:
+    reach = report.reach
+    if reach is None:
+        return report.verdict.value
+    return f"{report.verdict.value} / {reach.status.value} ({reach.confidence.value} confidence)"
+
+
+def _triage_symbols(report: TriageReport) -> list[str]:
+    """List what was searched for, and whether each symbol was even there.
+
+    The distinction between "present and unreached" and "not present at all"
+    is the difference between a verdict and a guess, so it is printed per
+    symbol rather than summarised.
+    """
+    if not report.symbols:
+        return [
+            "Vulnerable symbols",
+            "  none. This advisory does not say which functions its fix changed,",
+            "  so there was nothing to search for and nothing can be cleared.",
+            "",
+        ]
+
+    lines = ["Vulnerable symbols searched for"]
+    for probe in report.symbols:
+        if probe.missing:
+            state = "not in this version"
+        elif not probe.defined:
+            state = "called but its definition was not analysed"
+        else:
+            state = {
+                "certain": "REACHED",
+                "possible": "reached only through an unresolved call",
+                "unreached": "present, not reached",
+            }[probe.status]
+        lines.append(f"  {probe.symbol}")
+        lines.append(
+            f"      {state}  [{probe.kind.value}, from {probe.source.value}, "
+            f"{probe.confidence.value} confidence]"
+        )
+    lines.append("")
+    return lines
+
+
+def _triage_entry_points(report: TriageReport) -> list[str]:
+    """Show which starting points reach the vulnerable code.
+
+    This is the part that tells someone what to change. An advisory reachable
+    only from a maintenance script is a different problem from one reachable
+    from a request handler.
+    """
+    if not report.entry_points:
+        return [
+            "Entry points",
+            f"  {report.entry_point_count} considered, from {report.entry_point_source.value}.",
+            "  None are reported individually because no searched symbol exists",
+            "  in the linked graph, so there was nothing to trace a path to.",
+            "",
+        ]
+
+    reaching = report.reaching_entry_points
+    lines = [
+        "Entry points",
+        f"  {report.entry_point_count} considered, from {report.entry_point_source.value}; "
+        f"{len(reaching)} of the {len(report.entry_points)} examined reach the "
+        f"vulnerable code.",
+    ]
+    if report.entry_point_source is EntryPointSource.FALLBACK_PUBLIC:
+        lines.append(
+            "  These were inferred: every public function was treated as a possible start."
+        )
+        lines.append("  Pass --entry-point to say how the application really starts.")
+    lines.append("")
+
+    for entry in reaching:
+        lines.append(f"  {entry.entry_point}  ->  {entry.symbol}  [{entry.status}]")
+        for step in entry.path:
+            where = f"{step.file}:{step.line}" if step.file and step.line else ""
+            lines.append(f"      {step.symbol}  ({step.edge_kind.value})  {where}".rstrip())
+        lines.append("")
+
+    unreached = [entry for entry in report.entry_points if not entry.reaches]
+    if unreached:
+        shown = ", ".join(entry.entry_point for entry in unreached[:8])
+        more = f" and {len(unreached) - 8} more" if len(unreached) > 8 else ""
+        lines.append(f"  No path from: {shown}{more}")
+        lines.append("")
+
+    if report.entry_point_count > len(report.entry_points):
+        lines.append(
+            f"  {report.entry_point_count - len(report.entry_points)} further entry "
+            f"point(s) were searched together but not listed individually."
+        )
+        lines.append("")
+    return lines
+
+
+def _triage_graph(report: TriageReport) -> list[str]:
+    """State what the answer rests on, so a reader can judge it."""
+    stats = report.graph
+    if stats is None:
+        return []
+    return [
+        "Graph the answer rests on",
+        f"  {stats.first_party_nodes} first-party symbols, {stats.first_party_edges} edges, "
+        f"{stats.linked_packages} dependency package(s) linked",
+        f"  {stats.unresolved_call_ratio:.1%} of call sites could not be resolved precisely",
+        f"  {stats.parse_error_files} source file(s) failed to parse "
+        f"({stats.parse_error_ratio:.1%})",
+        "",
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
@@ -386,4 +563,5 @@ __all__ = [
     "render_sarif",
     "render_sarif_json",
     "render_text",
+    "render_triage",
 ]

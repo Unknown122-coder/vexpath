@@ -26,8 +26,8 @@ from pathlib import Path
 from vexpath_core import RESULTS_SCHEMA
 from vexpath_core import __version__ as core_version
 from vexpath_core.enums import ComponentScope, ScanMode, supports_reachability
-from vexpath_core.models.advisory import Advisory
-from vexpath_core.models.finding import Finding, GraphStats
+from vexpath_core.models.advisory import Advisory, VulnerableSymbol
+from vexpath_core.models.finding import EntryPointInfo, Finding, GraphStats
 from vexpath_core.models.results import ArtifactPaths, ProjectRef, SbomRef, ScanResults
 from vexpath_core.models.sbom import Sbom
 from vexpath_core.protocols import AdvisorySource, Clock, SystemClock
@@ -47,6 +47,7 @@ from vexpath_core.reach.dependencies import (
     graphs_for,
     site_packages_directories,
 )
+from vexpath_core.reach.graph import CallGraph
 from vexpath_core.sbom import generate_sbom, load, minimum_elements
 from vexpath_core.sbom.lockfiles import find_lockfiles
 from vexpath_core.vulnmatch import match
@@ -113,7 +114,7 @@ def scan(
     resolved_options = options or ScanOptions()
     resolved_clock = clock or SystemClock()
 
-    sbom = _inventory(root, resolved_options, resolved_clock)
+    sbom = build_inventory(root, resolved_options, resolved_clock)
     report = match(sbom, source, include_scopes=resolved_options.include_scopes)
 
     findings = report.findings
@@ -154,35 +155,59 @@ def scan(
     )
 
 
-def _decide_reachability(
-    root: Path,
-    sbom: Sbom,
-    findings: tuple[Finding, ...],
-    advisories: dict[str, Advisory],
-    options: ScanOptions,
-) -> tuple[tuple[Finding, ...], object, GraphStats | None, list[str]]:
-    """Run the reachability stage over a matched finding set."""
-    if not any(supports_reachability(component.ecosystem) for component in sbom.components):
-        # Nothing here can be analysed, so building a graph would be work for
-        # no verdict.
-        return findings, None, None, []
+@dataclass(frozen=True, slots=True)
+class ReachabilitySetup:
+    """The assembled graph a verdict is computed against.
 
-    first_party = build([SourceRoot(path=path) for path in _project_roots(root, options)])
+    Built once and shared, because ``vexpath reach`` has to reach the same
+    conclusion as ``vexpath scan`` on the same project. A triage command that
+    disagrees with the scan it is triaging is worse than no triage command, so
+    both go through here.
+    """
+
+    context: ReachabilityContext
+    dependencies: DependencyGraphs
+    stats: GraphStats
+    notes: tuple[str, ...] = ()
+
+    @property
+    def graph(self) -> CallGraph:
+        return self.context.graph
+
+    @property
+    def entry_points(self) -> EntryPointInfo:
+        return self.context.entry_points
+
+
+def prepare_reachability(
+    root: Path, sbom: Sbom, options: ScanOptions | None = None
+) -> ReachabilitySetup | None:
+    """Build the project's graph, link every available dependency, and search it.
+
+    Returns None when nothing in the inventory belongs to an ecosystem this
+    build can analyse, since building a graph would then be work for no
+    verdict.
+    """
+    resolved = options or ScanOptions()
+    if not any(supports_reachability(component.ecosystem) for component in sbom.components):
+        return None
+
+    first_party = build([SourceRoot(path=path) for path in _project_roots(root, resolved)])
 
     cache = (
-        GraphCache(options.cache_dir or default_cache_directory()) if options.use_cache else None
+        GraphCache(resolved.cache_dir or default_cache_directory()) if resolved.use_cache else None
     )
     # An environment root is not itself a package directory: its installed
     # packages live under lib/python*/site-packages or Lib/site-packages
     # depending on the platform, and that has to be resolved before anything
     # can be read.
     locations = (
-        None if options.environment is None else site_packages_directories(options.environment)
+        None if resolved.environment is None else site_packages_directories(resolved.environment)
     )
     dependencies: DependencyGraphs = graphs_for(sbom.components, locations=locations, cache=cache)
 
     graph = link([first_party, *dependencies.graphs])
-    entry_symbols, entry_points = choose(graph, configured=options.entry_points, root=root)
+    entry_symbols, entry_points = choose(graph, configured=resolved.entry_points, root=root)
     result = search(graph, entry_symbols)
     context = ReachabilityContext(
         graph=graph,
@@ -190,30 +215,6 @@ def _decide_reachability(
         entry_points=entry_points,
         analysed_packages=frozenset(dependencies.analysed),
         mentioned=mentioned_symbols(graph),
-    )
-
-    decided: list[Finding] = []
-    for finding in findings:
-        advisory = advisories.get(finding.id)
-        symbols = (
-            advisory.symbols_for(finding.component.ecosystem, finding.component.name)
-            if advisory
-            else ()
-        )
-        if advisory is not None and advisory.is_malicious_package:
-            # Installing malware runs it. Reachability is the wrong question,
-            # and the finding stays as matching left it.
-            decided.append(finding)
-            continue
-        decided.append(apply(finding, symbols, context))
-
-    stats = GraphStats(
-        first_party_nodes=sum(1 for node in graph.nodes.values() if node.is_first_party),
-        first_party_edges=graph.edge_count,
-        linked_packages=len(dependencies.analysed),
-        unresolved_call_ratio=round(graph.quality.unresolved_ratio, 4),
-        parse_error_files=graph.quality.files_failed,
-        parse_error_ratio=round(graph.quality.parse_error_ratio, 4),
     )
 
     notes: list[str] = []
@@ -226,7 +227,51 @@ def _decide_reachability(
             f"({', '.join(shown)}), so their findings cannot be cleared"
         )
 
-    return tuple(decided), entry_points, stats, notes
+    return ReachabilitySetup(
+        context=context,
+        dependencies=dependencies,
+        stats=GraphStats(
+            first_party_nodes=sum(1 for node in graph.nodes.values() if node.is_first_party),
+            first_party_edges=graph.edge_count,
+            linked_packages=len(dependencies.analysed),
+            unresolved_call_ratio=round(graph.quality.unresolved_ratio, 4),
+            parse_error_files=graph.quality.files_failed,
+            parse_error_ratio=round(graph.quality.parse_error_ratio, 4),
+        ),
+        notes=tuple(notes),
+    )
+
+
+def symbols_to_search(finding: Finding, advisory: Advisory | None) -> tuple[VulnerableSymbol, ...]:
+    """The vulnerable symbols to search for on behalf of one finding."""
+    if advisory is None:
+        return ()
+    return tuple(advisory.symbols_for(finding.component.ecosystem, finding.component.name))
+
+
+def _decide_reachability(
+    root: Path,
+    sbom: Sbom,
+    findings: tuple[Finding, ...],
+    advisories: dict[str, Advisory],
+    options: ScanOptions,
+) -> tuple[tuple[Finding, ...], EntryPointInfo | None, GraphStats | None, list[str]]:
+    """Run the reachability stage over a matched finding set."""
+    setup = prepare_reachability(root, sbom, options)
+    if setup is None:
+        return findings, None, None, []
+
+    decided: list[Finding] = []
+    for finding in findings:
+        advisory = advisories.get(finding.id)
+        if advisory is not None and advisory.is_malicious_package:
+            # Installing malware runs it. Reachability is the wrong question,
+            # and the finding stays as matching left it.
+            decided.append(finding)
+            continue
+        decided.append(apply(finding, symbols_to_search(finding, advisory), setup.context))
+
+    return tuple(decided), setup.entry_points, setup.stats, list(setup.notes)
 
 
 def _project_roots(root: Path, options: ScanOptions) -> list[Path]:
@@ -257,7 +302,7 @@ def _project_roots(root: Path, options: ScanOptions) -> list[Path]:
     return [root]
 
 
-def _inventory(root: Path, options: ScanOptions, clock: Clock) -> Sbom:
+def build_inventory(root: Path, options: ScanOptions, clock: Clock) -> Sbom:
     """Produce the inventory, from a supplied document or from a lockfile."""
     if options.sbom_path is not None:
         sbom = load(options.sbom_path, clock=clock)
@@ -290,4 +335,13 @@ def _relative(path: Path, root: Path) -> str:
         return path.name
 
 
-__all__ = ["NON_PROJECT_DIRECTORIES", "ScanOptions", "scan", "scanned_lockfile"]
+__all__ = [
+    "NON_PROJECT_DIRECTORIES",
+    "ReachabilitySetup",
+    "ScanOptions",
+    "build_inventory",
+    "prepare_reachability",
+    "scan",
+    "scanned_lockfile",
+    "symbols_to_search",
+]

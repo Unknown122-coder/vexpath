@@ -134,9 +134,29 @@ and the direct-call fixture reports the path
 requests.sessions.Session.request -> requests.sessions.Session.send`, five
 resolved calls into the dependency's internals.
 
+### Done: explaining a single verdict
+
+`vexpath reach --advisory CVE-…` answers the question that follows a scan, and
+the one people actually argue about: why did that finding come out the way it
+did. It prints the symbols searched for with their provenance and confidence,
+which of them exist in the installed version, which entry points reach them
+with the call path for each, and the graph the answer rests on.
+
+`core.triage` and `core.scan` build the same graph through the same
+`prepare_reachability`, so the two commands cannot disagree. A test asserts it
+directly rather than trusting the arrangement.
+
+Operator-supplied symbols are accepted with `--symbol`, which matters for the
+11.3 % of Python advisories with no recoverable fix commit. They are recorded
+with a `manual` provenance and low confidence, because nothing checked that the
+fix touched them.
+
+Writing this command found two wrong statements in the reachable explanation: a
+path of five symbols was described as five calls rather than four, and a symbol
+that is itself an entry point was described as being called from itself.
+
 ### Remaining
 
-- `vexpath reach`, for triaging a single advisory against a project.
 - The `advisory.patchdiff` worker job, wiring extraction into the sync pipeline
   and storing symbols in the database.
 - Dependency graphs from downloaded archives, for packages a scan's environment

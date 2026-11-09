@@ -9,13 +9,12 @@ from typing import Annotated
 import typer
 
 from vexpath.output import OutputFormat, emit, emit_json, fail, note
+from vexpath.sources import SNAPSHOT_ENV
 from vexpath_core.advisory.coverage import FixReferenceTier, measure
 from vexpath_core.advisory.sync import DEFAULT_ECOSYSTEMS, AdvisorySyncError
 from vexpath_core.advisory.sync import sync as run_sync
 from vexpath_core.enums import canonical_ecosystem
 from vexpath_core.snapshot import SnapshotIntegrityError, read_snapshot
-
-SNAPSHOT_ENV = "VEXPATH_ADVISORY_SNAPSHOT_DIR"
 
 app = typer.Typer(help="Download and inspect the advisory corpus.", no_args_is_help=True)
 

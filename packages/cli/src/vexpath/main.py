@@ -13,6 +13,7 @@ import typer
 
 from vexpath import __version__ as cli_version
 from vexpath.commands import advisory as advisory_commands
+from vexpath.commands import reach as reach_command
 from vexpath.commands import sbom as sbom_commands
 from vexpath.commands import scan as scan_command
 from vexpath.output import OutputFormat, emit, emit_json
@@ -35,6 +36,7 @@ app = typer.Typer(
 app.add_typer(sbom_commands.app, name="sbom")
 app.add_typer(advisory_commands.app, name="advisory")
 app.command("scan")(scan_command.command)
+app.command("reach")(reach_command.command)
 
 
 @app.callback()

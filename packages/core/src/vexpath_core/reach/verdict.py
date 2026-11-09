@@ -303,12 +303,33 @@ def _reached_explanation(
     path: Sequence[object],
     context: ReachabilityContext,
 ) -> str:
+    """Describe a reachable verdict in the terms a reader checks it in.
+
+    The count is of calls, not of path steps: a path of five symbols is four
+    calls, and claiming five invites a reader who counts to distrust the whole
+    report. A path of one symbol is no calls at all, which means the vulnerable
+    code is itself a starting point.
+    """
     symbol = matched[0]
     start = path[0].symbol if path else "an entry point"  # type: ignore[attr-defined]
+    calls = max(len(path) - 1, 0)
+
     if status is ReachStatus.REACHABLE_CONFIRMED:
+        if calls == 0:
+            return (
+                f"{symbol} is itself an entry point of this project, so the "
+                f"vulnerable code runs without being called from anywhere."
+            )
         return (
-            f"{symbol} is called from {start}, through {len(path)} resolved "
+            f"{symbol} is called from {start}, through {calls} resolved "
             f"call(s). The vulnerable code can run."
+        )
+
+    if calls == 0:
+        return (
+            f"{symbol} is itself an entry point of this project, but reaching it "
+            f"depends on a call this analysis could not resolve precisely. Treat "
+            f"it as reachable until proven otherwise."
         )
     return (
         f"{symbol} may be called from {start}, but every path found depends on a "

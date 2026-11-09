@@ -9,7 +9,7 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 | `vexpath sbom generate [PATH] [-o sbom.cdx.json] [--format cyclonedx\|spdx]` | Generate an SBOM from lockfiles (native) or via Syft (`--syft`) |
 | `vexpath sbom validate FILE` | Schema-validate a CycloneDX/SPDX document; report CISA minimum-elements gaps |
 | `vexpath scan [PATH] [--sbom FILE] [--entry-point SYM] [--environment DIR] [--no-reach] [--no-cache] [--policy FILE\|preset] [--upload] [--sign]` | Full pipeline: SBOM → match → reachability → VEX → policy. The default command. |
-| `vexpath reach [PATH] --advisory CVE-… [--symbol …]` | Reachability for one advisory; prints all paths. Debugging and triage. |
+| `vexpath reach [PATH] --advisory CVE-… [--symbol …] [--entry-point SYM] [--environment DIR]` | Reachability for one advisory: the symbols searched for and their provenance, which entry points reach them and by what path, and the graph the answer rests on. Triage and debugging. |
 | `vexpath vex export [--format openvex\|cyclonedx] [-o FILE]` | Write VEX for the last scan |
 | `vexpath attest sign FILE --type sbom\|vex` | Produce a signed in-toto statement (keyless by default; `--key` for a static key) |
 | `vexpath attest verify FILE --identity … --issuer …` | Verify a DSSE envelope against Rekor and identity constraints |
@@ -20,9 +20,16 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 | `vexpath login` / `vexpath whoami` | Store an API key for uploads |
 
 Implemented today: `sbom generate|validate|lockfiles`, `scan` (through
-reachability, without policy, VEX or upload), `advisory sync|show|coverage`, and
-`version`. The rest arrive with the milestone that needs them, and the table is
-the target shape rather than a claim about the current build.
+reachability, without policy, VEX or upload), `reach`, `advisory
+sync|show|coverage`, and `version`. The rest arrive with the milestone that
+needs them, and the table is the target shape rather than a claim about the
+current build.
+
+`reach` exits 1 when the advisory is reachable and 0 otherwise, so a script can
+act on one advisory without parsing the report. An admitted unknown exits 0: not
+being able to decide is not an analysis failure. It answers each entry point
+separately, because an advisory reachable only from a maintenance script is a
+different problem from one reachable from a request handler.
 
 Reachability needs the project's dependencies readable on disk. `--environment`
 names the virtual environment holding them, defaulting to the one `vexpath` is

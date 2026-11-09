@@ -2,30 +2,22 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from vexpath.exit_codes import ExitCode
-from vexpath.output import OutputFormat, emit, emit_json, fail, note, warn
+from vexpath.output import OutputFormat, emit, emit_json, fail, note
+from vexpath.sources import SNAPSHOT_ENV, advisory_source, close_source
 from vexpath_core import report
-from vexpath_core.advisory import OsvApiSource, SnapshotSource
 from vexpath_core.advisory.source import AdvisorySourceError
 from vexpath_core.enums import ComponentScope
-from vexpath_core.protocols import AdvisorySource
 from vexpath_core.sbom import LockfileError, UnknownSbomFormatError
 from vexpath_core.sbom.cyclonedx import CycloneDxError
 from vexpath_core.sbom.spdx import SpdxError
 from vexpath_core.scan import ScanOptions, scanned_lockfile
 from vexpath_core.scan import scan as run_scan
-from vexpath_core.snapshot import SnapshotIntegrityError
-
-#: Environment variable naming a local advisory snapshot. Set it and scans
-#: become reproducible and offline by default.
-SNAPSHOT_ENV = "VEXPATH_ADVISORY_SNAPSHOT_DIR"
-OSV_BASE_ENV = "VEXPATH_OSV_API_BASE"
 
 
 def command(
@@ -138,7 +130,7 @@ def command(
             "finding will be cleared."
         )
 
-    source = _advisory_source(snapshot)
+    source = advisory_source(snapshot, result_noun="scan")
     scopes = (
         frozenset({ComponentScope.RUNTIME, ComponentScope.OPTIONAL})
         if ignore_dev
@@ -166,48 +158,13 @@ def command(
             f"'vexpath advisory sync' and pass --snapshot."
         )
     finally:
-        close = getattr(source, "close", None)
-        if callable(close):
-            close()
+        close_source(source)
 
     _render(results, output_format, path, options, show_cleared=show_cleared)
 
     needs_attention = len(results.findings_needing_attention())
     if fail_on_findings and needs_attention:
         raise typer.Exit(code=int(ExitCode.POLICY_FAILED))
-
-
-def _advisory_source(snapshot: Path | None) -> AdvisorySource:
-    """Choose where advisories come from, preferring a reproducible snapshot."""
-    directory = snapshot or _snapshot_from_environment()
-    if directory is not None:
-        try:
-            source = SnapshotSource(directory)
-        except FileNotFoundError as exc:
-            fail(str(exc))
-        except SnapshotIntegrityError as exc:
-            # A corrupted corpus changes verdicts, so this is fatal.
-            fail(f"advisory snapshot is not trustworthy: {exc}")
-        note(f"using advisory snapshot {source.snapshot_id} from {directory}")
-        return source
-
-    warn(
-        "No advisory snapshot was given, so advisories will be read live from "
-        "OSV and this scan will not be reproducible. Run 'vexpath advisory sync' "
-        f"and set ${SNAPSHOT_ENV} to fix that."
-    )
-    return OsvApiSource(base_url=os.environ.get(OSV_BASE_ENV, "https://api.osv.dev"))
-
-
-def _snapshot_from_environment() -> Path | None:
-    raw = os.environ.get(SNAPSHOT_ENV, "").strip()
-    if not raw:
-        return None
-    candidate = Path(raw)
-    if not candidate.is_dir():
-        warn(f"${SNAPSHOT_ENV} points at {candidate}, which is not a directory; ignoring it.")
-        return None
-    return candidate
 
 
 def _render(
