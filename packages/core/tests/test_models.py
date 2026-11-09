@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from sscp_core.enums import (
+from vexpath_core.enums import (
     Confidence,
     EdgeKind,
     ReachReason,
@@ -21,14 +21,14 @@ from sscp_core.enums import (
     Verdict,
     VexJustification,
 )
-from sscp_core.models.advisory import (
+from vexpath_core.models.advisory import (
     Advisory,
     AffectedPackage,
     AffectedRange,
     RangeEvent,
     RangeType,
 )
-from sscp_core.models.finding import (
+from vexpath_core.models.finding import (
     AdvisoryRef,
     CallPathStep,
     ComponentRef,
@@ -264,7 +264,7 @@ def test_fixed_versions_are_collected_across_ranges() -> None:
 
 
 def test_curated_symbols_override_extracted_ones() -> None:
-    from sscp_core.models.advisory import VulnerableSymbol
+    from vexpath_core.models.advisory import VulnerableSymbol
 
     def symbol(source: SymbolSource, name: str) -> VulnerableSymbol:
         return VulnerableSymbol(

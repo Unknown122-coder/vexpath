@@ -7,7 +7,7 @@ The platform is a **library-first** system. All analysis logic lives in one Pyth
 ```mermaid
 flowchart LR
     subgraph Clients
-        CLI[sscp CLI]
+        CLI[vexpath CLI]
         GHA[GitHub Action]
         WEB[Web dashboard<br/>Jinja2 + HTMX]
         PUB[Public pages<br/>reports · packages · badge]
@@ -94,14 +94,14 @@ Design rules for core:
 - Models are Pydantic v2 and are the single schema for API responses, CLI JSON output and database rows.
 - No module imports from `apps/`.
 
-### 2.2 `packages/cli` — `sscp`
+### 2.2 `packages/cli` — `vexpath`
 
-Thin Typer application over core. Commands are specified in `04-api-and-cli.md`. Outputs JSON on `--format json` so the Action and other tooling can consume it. Reads `.sscp.yml` from the repo root for policy, entry points and ignore rules.
+Thin Typer application over core. Commands are specified in `04-api-and-cli.md`. Outputs JSON on `--format json` so the Action and other tooling can consume it. Reads `.vexpath.yml` from the repo root for policy, entry points and ignore rules.
 
 ### 2.3 `apps/api` — FastAPI service
 
 - REST API, OpenAPI 3.1 spec generated and committed.
-- Auth: session cookies for the web app (GitHub OAuth login), bearer API keys for CLI/Action (`sscp_live_…`, hashed at rest), GitHub App installation tokens for hosted scans.
+- Auth: session cookies for the web app (GitHub OAuth login), bearer API keys for CLI/Action (`vexpath_live_…`, hashed at rest), GitHub App installation tokens for hosted scans.
 - Enqueues jobs; never does heavy work in-request.
 - Serves the badge endpoint with edge-cacheable responses (`Cache-Control`, ETag).
 - Emits audit-log rows for every mutating call.
@@ -144,14 +144,14 @@ Docker-based action pinning a specific CLI version. Inputs: `policy`, `fail-on`,
 sequenceDiagram
     autonumber
     participant Dev as Developer / CI
-    participant CLI as sscp CLI (core)
+    participant CLI as vexpath CLI (core)
     participant ADV as Advisory source<br/>(API or local snapshot)
     participant CG as Call-graph cache
     participant SIG as Sigstore
     participant API as Platform API
     participant W as scan.ingest worker
 
-    Dev->>CLI: sscp scan .
+    Dev->>CLI: vexpath scan .
     CLI->>CLI: Detect lockfiles, generate or load SBOM, validate schema
     CLI->>ADV: Query advisories by purl (batched)
     ADV-->>CLI: Advisories + affected ranges + vulnerable_symbols + snapshot id
@@ -207,11 +207,11 @@ Coverage of each tier is tracked as a metric from M1 onward, because the usefuln
 │   ├── worker/              Job modules; procrastinate app from M1
 │   └── action/              action.yml, Dockerfile, entrypoint (M5)
 ├── packages/
-│   ├── core/                sscp_core: models/ ids purl enums protocols snapshot,
+│   ├── core/                vexpath_core: models/ ids purl enums protocols snapshot,
 │   │                        then sbom/ advisory/ vulnmatch/ reach/ vex/ attest/ policy/ report/
-│   ├── platform/            sscp_platform: settings, logging, object storage
-│   ├── db/                  sscp_db: SQLAlchemy tables, engine helpers, Alembic migrations
-│   └── cli/                 sscp: Typer commands
+│   ├── platform/            vexpath_platform: settings, logging, object storage
+│   ├── db/                  vexpath_db: SQLAlchemy tables, engine helpers, Alembic migrations
+│   └── cli/                 vexpath: Typer commands
 ├── infra/
 │   ├── docker-compose.yml   Postgres, migrate, api, seed for local dev
 │   ├── alembic.ini          Migration config; the URL comes from the environment

@@ -7,9 +7,9 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from sscp_api.main import create_app
-from sscp_api.templating import STATIC_DIR, TEMPLATES_DIR
-from sscp_platform.settings import Environment, Settings
+from vexpath_api.main import create_app
+from vexpath_api.templating import STATIC_DIR, TEMPLATES_DIR
+from vexpath_platform.settings import Environment, Settings
 
 
 @pytest.fixture

@@ -8,15 +8,15 @@
 #   make up     start everything
 #   make down   stop everything
 
-name: sscp
+name: vexpath
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: sscp
-      POSTGRES_PASSWORD: sscp
-      POSTGRES_DB: sscp
+      POSTGRES_USER: vexpath
+      POSTGRES_PASSWORD: vexpath
+      POSTGRES_DB: vexpath
       # Deterministic collation, so index ordering matches between a developer
       # machine and CI.
       POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
@@ -25,7 +25,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sscp -d sscp"]
+      test: ["CMD-SHELL", "pg_isready -U vexpath -d vexpath"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -38,7 +38,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@postgres:5432/sscp
+      VEXPATH_DATABASE_URL: postgresql+psycopg://vexpath:vexpath@postgres:5432/vexpath
     command: ["alembic", "-c", "infra/alembic.ini", "upgrade", "head"]
 
   api:
@@ -51,12 +51,12 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      SSCP_ENV: local
-      SSCP_BASE_URL: http://localhost:8000
-      SSCP_SECRET_KEY: local-development-only
-      SSCP_LOG_FORMAT: console
-      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@postgres:5432/sscp
-      SSCP_ADVISORY_SNAPSHOT_DIR: /app/testdata/advisories
+      VEXPATH_ENV: local
+      VEXPATH_BASE_URL: http://localhost:8000
+      VEXPATH_SECRET_KEY: local-development-only
+      VEXPATH_LOG_FORMAT: console
+      VEXPATH_DATABASE_URL: postgresql+psycopg://vexpath:vexpath@postgres:5432/vexpath
+      VEXPATH_ADVISORY_SNAPSHOT_DIR: /app/testdata/advisories
     ports:
       - "8000:8000"
     volumes:
@@ -66,7 +66,7 @@ services:
       - ../apps:/app/apps:ro
     command:
       - uvicorn
-      - sscp_api.main:app
+      - vexpath_api.main:app
       - --host
       - 0.0.0.0
       - --port
@@ -87,9 +87,9 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@postgres:5432/sscp
-      SSCP_LOG_FORMAT: console
-    command: ["python", "-m", "sscp_worker.main", "seed-advisories", "testdata/advisories"]
+      VEXPATH_DATABASE_URL: postgresql+psycopg://vexpath:vexpath@postgres:5432/vexpath
+      VEXPATH_LOG_FORMAT: console
+    command: ["python", "-m", "vexpath_worker.main", "seed-advisories", "testdata/advisories"]
 
 volumes:
   postgres-data:

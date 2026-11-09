@@ -6,7 +6,7 @@ name: Advisory sync
 # (docs/01-architecture.md section 7.1). It runs here rather than in the
 # platform because a snapshot is useful on its own: an air-gapped environment
 # copies it in, and a team that wants reproducible scans for a whole week
-# downloads one and points SSCP_ADVISORY_SNAPSHOT_DIR at it.
+# downloads one and points VEXPATH_ADVISORY_SNAPSHOT_DIR at it.
 
 on:
   schedule:
@@ -47,7 +47,7 @@ jobs:
       - name: Download the corpus and write a snapshot
         # No database here, so the snapshot is written and nothing is loaded.
         run: >
-          uv run python -m sscp_worker.main sync-advisories var/advisories
+          uv run python -m vexpath_worker.main sync-advisories var/advisories
           --ecosystem "${{ inputs.ecosystems || 'PyPI,npm' }}"
           --no-load
 
@@ -59,7 +59,7 @@ jobs:
           {
             echo '## Advisory corpus'
             echo
-            uv run sscp advisory coverage --snapshot var/advisories
+            uv run vexpath advisory coverage --snapshot var/advisories
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the snapshot

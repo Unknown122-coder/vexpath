@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import create_engine, inspect
 
-from sscp_core.enums import Confidence, SymbolKind, SymbolSource, SymbolsStatus
-from sscp_db.engine import normalise_url
-from sscp_db.tables import GLOBAL_TABLES, metadata
+from vexpath_core.enums import Confidence, SymbolKind, SymbolSource, SymbolsStatus
+from vexpath_db.engine import normalise_url
+from vexpath_db.tables import GLOBAL_TABLES, metadata
 
 EXPECTED_TABLES = {
     "advisories",

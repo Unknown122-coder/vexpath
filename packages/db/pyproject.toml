@@ -1,11 +1,11 @@
 [project]
-name = "sscp-db"
+name = "vexpath-db"
 version = "0.0.1"
 description = "Database schema, engine helpers and migrations shared by the API and the workers."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "sscp-core",
+    "vexpath-core",
     "sqlalchemy[asyncio]>=2.0.36",
     "psycopg[binary]>=3.2",
     "alembic>=1.14",
@@ -16,4 +16,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sscp_db"]
+packages = ["src/vexpath_db"]

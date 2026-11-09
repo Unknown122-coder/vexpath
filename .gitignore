@@ -28,7 +28,7 @@ coverage.xml
 /cdx-vex.json
 /attestation.intoto.jsonl
 /results.json
-.sscp-cache/
+.vexpath-cache/
 
 # Advisory snapshots downloaded at runtime (the frozen test snapshot IS committed)
 /var/

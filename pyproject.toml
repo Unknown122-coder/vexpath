@@ -1,15 +1,15 @@
 [project]
-name = "sscp-workspace"
+name = "vexpath-workspace"
 version = "0.0.0"
 description = "Workspace root for the software supply-chain security platform. Not published."
 requires-python = ">=3.12"
 dependencies = [
-    "sscp-core",
-    "sscp-platform",
-    "sscp-db",
-    "sscp",
-    "sscp-api",
-    "sscp-worker",
+    "vexpath-core",
+    "vexpath-platform",
+    "vexpath-db",
+    "vexpath",
+    "vexpath-api",
+    "vexpath-worker",
 ]
 
 [tool.uv]
@@ -26,12 +26,12 @@ members = [
 ]
 
 [tool.uv.sources]
-sscp-core = { workspace = true }
-sscp-platform = { workspace = true }
-sscp-db = { workspace = true }
-sscp = { workspace = true }
-sscp-api = { workspace = true }
-sscp-worker = { workspace = true }
+vexpath-core = { workspace = true }
+vexpath-platform = { workspace = true }
+vexpath-db = { workspace = true }
+vexpath = { workspace = true }
+vexpath-api = { workspace = true }
+vexpath-worker = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -40,7 +40,7 @@ dev = [
     "pytest-cov>=5.0",
     "mypy>=1.13",
     "ruff>=0.8",
-    # Starlette's test client requires httpx2; httpx 0.x is what sscp_core
+    # Starlette's test client requires httpx2; httpx 0.x is what vexpath_core
     # uses for its own outbound calls, so both are present deliberately.
     "httpx>=0.28",
     "httpx2>=0.29",
@@ -53,7 +53,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["testdata/repos", "packages/db/src/sscp_db/migrations/versions"]
+extend-exclude = ["testdata/repos", "packages/db/src/vexpath_db/migrations/versions"]
 
 [tool.ruff.lint]
 select = [
@@ -83,10 +83,10 @@ ignore = [
 "packages/cli/**" = ["T20"]          # the CLI prints by design
 "**/tests/**" = ["S", "T20"]
 "tools/**" = ["T20"]               # developer scripts report progress
-"packages/db/src/sscp_db/migrations/**" = ["N999", "T20", "I001"]
+"packages/db/src/vexpath_db/migrations/**" = ["N999", "T20", "I001"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sscp_core", "sscp_platform", "sscp_db", "sscp", "sscp_api", "sscp_worker"]
+known-first-party = ["vexpath_core", "vexpath_platform", "vexpath_db", "vexpath", "vexpath_api", "vexpath_worker"]
 
 # ---------------------------------------------------------------------------
 # Types
@@ -96,7 +96,7 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
-exclude = ["testdata/repos", "packages/db/src/sscp_db/migrations/versions"]
+exclude = ["testdata/repos", "packages/db/src/vexpath_db/migrations/versions"]
 
 [[tool.mypy.overrides]]
 # Third-party packages without complete type information.
@@ -106,7 +106,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # Strictness is enforced on the analysis core; apps are checked less aggressively
 # because framework decorators defeat a lot of inference.
-module = ["sscp_api.*", "sscp_worker.*"]
+module = ["vexpath_api.*", "vexpath_worker.*"]
 disallow_untyped_decorators = false
 
 # ---------------------------------------------------------------------------

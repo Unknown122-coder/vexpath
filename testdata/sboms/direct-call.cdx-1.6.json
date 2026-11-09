@@ -9,7 +9,7 @@
       "components": [
         {
           "type": "application",
-          "name": "sscp",
+          "name": "vexpath",
           "version": "0.0.1"
         }
       ]

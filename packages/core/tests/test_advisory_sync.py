@@ -16,13 +16,13 @@ from typing import Any
 import httpx
 import pytest
 
-from sscp_core.advisory.sync import (
+from vexpath_core.advisory.sync import (
     MAX_ARCHIVE_BYTES,
     OSV_EXPORT_BASE,
     AdvisorySyncError,
     sync,
 )
-from sscp_core.snapshot import read_snapshot
+from vexpath_core.snapshot import read_snapshot
 
 
 def _record(

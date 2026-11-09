@@ -18,15 +18,15 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sscp_core.cvss import base_score, severity_from_vector
-from sscp_core.enums import (
+from vexpath_core.cvss import base_score, severity_from_vector
+from vexpath_core.enums import (
     Confidence,
     Severity,
     SymbolKind,
     SymbolSource,
     SymbolsStatus,
 )
-from sscp_core.models.advisory import (
+from vexpath_core.models.advisory import (
     Advisory,
     AdvisorySnapshot,
     AffectedPackage,
@@ -35,9 +35,9 @@ from sscp_core.models.advisory import (
     RangeType,
     VulnerableSymbol,
 )
-from sscp_core.models.common import CvssScore, Reference
-from sscp_core.purl import build_purl
-from sscp_core.snapshot import write_snapshot
+from vexpath_core.models.common import CvssScore, Reference
+from vexpath_core.purl import build_purl
+from vexpath_core.snapshot import write_snapshot
 
 SNAPSHOT_ID = "test-snapshot-0001"
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "testdata" / "advisories"

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from sscp_core.ids import is_ulid, new_ulid, ulid_timestamp
+from vexpath_core.ids import is_ulid, new_ulid, ulid_timestamp
 
 
 def test_ulid_has_the_canonical_shape() -> None:

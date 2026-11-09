@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from sscp_core.enums import Severity, SymbolsStatus
-from sscp_core.models.advisory import Advisory, AdvisorySnapshot
-from sscp_core.snapshot import (
+from vexpath_core.enums import Severity, SymbolsStatus
+from vexpath_core.models.advisory import Advisory, AdvisorySnapshot
+from vexpath_core.snapshot import (
     ADVISORIES_FILE,
     SnapshotIntegrityError,
     advisory_source_hash,

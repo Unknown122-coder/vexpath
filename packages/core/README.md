@@ -1,8 +1,8 @@
-# sscp-core
+# vexpath-core
 
 The analysis core. Everything that decides a verdict lives here, and nothing here imports a web framework or a database driver.
 
-The same code runs in three places: the `sscp` CLI on a developer machine, the GitHub Action in CI, and the platform's sandboxed workers. That is deliberate (see `docs/adr/0010-local-first-analysis.md`): a verdict must not depend on where it was computed.
+The same code runs in three places: the `vexpath` CLI on a developer machine, the GitHub Action in CI, and the platform's sandboxed workers. That is deliberate (see `docs/adr/0010-local-first-analysis.md`): a verdict must not depend on where it was computed.
 
 ## Sub-packages
 

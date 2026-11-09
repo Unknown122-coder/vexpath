@@ -1,25 +1,25 @@
 # 04 · API, CLI and GitHub Action Interfaces
 
-## 1. CLI: `sscp`
+## 1. CLI: `vexpath`
 
-Installed with `pipx install sscp` or `uv tool install sscp`. All commands accept `--format table|json|markdown|sarif` and `--quiet`. Exit codes: `0` ok, `1` policy failed, `2` analysis error, `3` configuration error.
+Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands accept `--format table|json|markdown|sarif` and `--quiet`. Exit codes: `0` ok, `1` policy failed, `2` analysis error, `3` configuration error.
 
 | Command | Purpose |
 |---|---|
-| `sscp sbom generate [PATH] [-o sbom.cdx.json] [--format cyclonedx\|spdx]` | Generate an SBOM from lockfiles (native) or via Syft (`--syft`) |
-| `sscp sbom validate FILE` | Schema-validate a CycloneDX/SPDX document; report CISA minimum-elements gaps |
-| `sscp scan [PATH] [--sbom FILE] [--no-reach] [--policy FILE\|preset] [--upload] [--sign]` | Full pipeline: SBOM → match → reachability → VEX → policy. The default command. |
-| `sscp reach [PATH] --advisory CVE-… [--symbol …]` | Reachability for one advisory; prints all paths. Debugging and triage. |
-| `sscp vex export [--format openvex\|cyclonedx] [-o FILE]` | Write VEX for the last scan |
-| `sscp attest sign FILE --type sbom\|vex` | Produce a signed in-toto statement (keyless by default; `--key` for a static key) |
-| `sscp attest verify FILE --identity … --issuer …` | Verify a DSSE envelope against Rekor and identity constraints |
-| `sscp policy test POLICY [--scan results.json]` | Evaluate a CEL policy against scan output without rescanning |
-| `sscp advisory show CVE-…` | Advisory details, affected ranges, extracted vulnerable symbols with confidence |
-| `sscp advisory sync [--ecosystem PyPI,npm] [--dir ~/.cache/sscp]` | Download a local advisory snapshot for offline/air-gapped use |
-| `sscp callgraph build PATH` / `sscp callgraph show SYMBOL` | Build/inspect graphs; used in development and support |
-| `sscp login` / `sscp whoami` | Store an API key for uploads |
+| `vexpath sbom generate [PATH] [-o sbom.cdx.json] [--format cyclonedx\|spdx]` | Generate an SBOM from lockfiles (native) or via Syft (`--syft`) |
+| `vexpath sbom validate FILE` | Schema-validate a CycloneDX/SPDX document; report CISA minimum-elements gaps |
+| `vexpath scan [PATH] [--sbom FILE] [--no-reach] [--policy FILE\|preset] [--upload] [--sign]` | Full pipeline: SBOM → match → reachability → VEX → policy. The default command. |
+| `vexpath reach [PATH] --advisory CVE-… [--symbol …]` | Reachability for one advisory; prints all paths. Debugging and triage. |
+| `vexpath vex export [--format openvex\|cyclonedx] [-o FILE]` | Write VEX for the last scan |
+| `vexpath attest sign FILE --type sbom\|vex` | Produce a signed in-toto statement (keyless by default; `--key` for a static key) |
+| `vexpath attest verify FILE --identity … --issuer …` | Verify a DSSE envelope against Rekor and identity constraints |
+| `vexpath policy test POLICY [--scan results.json]` | Evaluate a CEL policy against scan output without rescanning |
+| `vexpath advisory show CVE-…` | Advisory details, affected ranges, extracted vulnerable symbols with confidence |
+| `vexpath advisory sync [--ecosystem PyPI,npm] [--dir ~/.cache/vexpath]` | Download a local advisory snapshot for offline/air-gapped use |
+| `vexpath callgraph build PATH` / `vexpath callgraph show SYMBOL` | Build/inspect graphs; used in development and support |
+| `vexpath login` / `vexpath whoami` | Store an API key for uploads |
 
-### `.sscp.yml`
+### `.vexpath.yml`
 
 ```yaml
 version: 1
@@ -59,16 +59,16 @@ Reachability analysis covers Python components only (ADR-0012). Components from 
 ## 2. GitHub Action: `apps/action`
 
 ```yaml
-- uses: <org>/sscp-action@v1
+- uses: <org>/vexpath-action@v1
   with:
     policy: balanced              # preset, path, or inline CEL
-    upload: true                  # requires SSCP_API_KEY secret (or GitHub App)
+    upload: true                  # requires VEXPATH_API_KEY secret (or GitHub App)
     sign: true                    # keyless via the job's OIDC token; needs id-token: write
     sarif: true                   # upload to Code Scanning for inline annotations
     comment: on-change            # always | on-change | never — PR comment with diff
     sbom-path: ""                 # use an existing SBOM instead of generating
   env:
-    SSCP_API_KEY: ${{ secrets.SSCP_API_KEY }}
+    VEXPATH_API_KEY: ${{ secrets.VEXPATH_API_KEY }}
 ```
 
 Outputs: `verdict-summary` (JSON), `vex-path`, `attestation-path`, `report-url`.
@@ -77,7 +77,7 @@ Permissions required: `contents: read`, `id-token: write` (signing), `security-e
 
 ## 3. REST API: `apps/api`
 
-Base URL `https://api.<domain>/v1`. JSON everywhere; problem details (RFC 9457) for errors. Authentication by `Authorization: Bearer sscp_live_…` or session cookie. Rate limits: 60 requests/minute per key for writes, 600 for reads; unauthenticated badge and public endpoints are edge-cached.
+Base URL `https://api.<domain>/v1`. JSON everywhere; problem details (RFC 9457) for errors. Authentication by `Authorization: Bearer vexpath_live_…` or session cookie. Rate limits: 60 requests/minute per key for writes, 600 for reads; unauthenticated badge and public endpoints are edge-cached.
 
 ### Projects and scans
 
@@ -113,7 +113,7 @@ Base URL `https://api.<domain>/v1`. JSON everywhere; problem details (RFC 9457) 
 | `POST` | `/advisories/query` | `{purls: [...]}` batched match; returns findings-shaped records with snapshot id. Used by the CLI. Max 2,000 purls per call. |
 | `GET` | `/packages/{ecosystem}/{name}` | Package page data: advisory history, symbol coverage, public-project reach stats |
 | `GET` | `/snapshots/{id}` | Snapshot metadata |
-| `GET` | `/snapshots/latest/download?ecosystem=PyPI` | zstd JSONL for `sscp advisory sync` |
+| `GET` | `/snapshots/latest/download?ecosystem=PyPI` | zstd JSONL for `vexpath advisory sync` |
 
 ### Call-graph cache (global)
 
@@ -142,7 +142,7 @@ Per project: `scan.completed`, `finding.new_reachable`, `advisory.updated_affect
 
 ```json
 {
-  "schema": "sscp.results/1",
+  "schema": "vexpath.results/1",
   "core_version": "0.3.0",
   "advisory_snapshot_id": "01J…",
   "project": {"slug": "acme/api", "git_ref": "refs/heads/main", "git_sha": "…"},
@@ -177,4 +177,4 @@ Per project: `scan.completed`, `finding.new_reachable`, `advisory.updated_affect
 }
 ```
 
-This schema is versioned (`sscp.results/1`) and published as JSON Schema in `packages/core/schemas/`.
+This schema is versioned (`vexpath.results/1`) and published as JSON Schema in `packages/core/schemas/`.

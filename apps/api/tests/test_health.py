@@ -7,9 +7,9 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from sscp_api.main import SECURITY_HEADERS, create_app
-from sscp_core import RESULTS_SCHEMA
-from sscp_platform.settings import Environment, Settings
+from vexpath_api.main import SECURITY_HEADERS, create_app
+from vexpath_core import RESULTS_SCHEMA
+from vexpath_platform.settings import Environment, Settings
 
 
 @pytest.fixture

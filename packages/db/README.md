@@ -1,8 +1,8 @@
-# sscp-db
+# vexpath-db
 
 The database schema, in one place, so the API and the workers cannot disagree about it.
 
-This package exists for a boundary reason: `sscp-core` must never import SQLAlchemy, because the analysis core has to run on a developer's laptop with no database at all. But the API and the worker both need the same tables, and neither should import the other. So the tables live here and both depend on this package.
+This package exists for a boundary reason: `vexpath-core` must never import SQLAlchemy, because the analysis core has to run on a developer's laptop with no database at all. But the API and the worker both need the same tables, and neither should import the other. So the tables live here and both depend on this package.
 
 ## Contents
 

@@ -2,7 +2,7 @@
 # UI into the API, so there is no third).
 #
 # Build from the repository root:
-#   docker build -f infra/Dockerfile -t sscp .
+#   docker build -f infra/Dockerfile -t vexpath .
 
 # --- Builder ---------------------------------------------------------------
 FROM python:3.12-slim-bookworm AS builder
@@ -53,18 +53,18 @@ RUN apt-get update \
 
 # Analysis runs as an unprivileged user and never executes analysed code
 # (docs/06-threat-model.md).
-RUN useradd --create-home --uid 10001 sscp
+RUN useradd --create-home --uid 10001 vexpath
 
 WORKDIR /app
-COPY --from=builder --chown=sscp:sscp /app /app
-COPY --chown=sscp:sscp infra/alembic.ini infra/alembic.ini
-COPY --chown=sscp:sscp testdata/ testdata/
+COPY --from=builder --chown=vexpath:vexpath /app /app
+COPY --chown=vexpath:vexpath infra/alembic.ini infra/alembic.ini
+COPY --chown=vexpath:vexpath testdata/ testdata/
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-USER sscp
+USER vexpath
 EXPOSE 8000
 
 # Liveness only: deliberately independent of the database, so a database
@@ -72,4 +72,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
     CMD curl --fail --silent http://localhost:8000/healthz || exit 1
 
-CMD ["uvicorn", "sscp_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "vexpath_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

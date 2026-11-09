@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from sscp_core.enums import ComponentScope
-from sscp_core.sbom.lockfiles import (
+from vexpath_core.enums import ComponentScope
+from vexpath_core.sbom.lockfiles import (
     LOCKFILE_PRIORITY,
     LockfileError,
     find_lockfiles,

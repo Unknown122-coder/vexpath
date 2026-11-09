@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from sscp_core import RESULTS_SCHEMA
-from sscp_core.advisory import SnapshotSource
-from sscp_core.enums import ComponentScope, ScanMode, Severity, Verdict
-from sscp_core.models.results import ScanResults
-from sscp_core.protocols import FixedClock
-from sscp_core.scan import ScanOptions, scan, scanned_lockfile
+from vexpath_core import RESULTS_SCHEMA
+from vexpath_core.advisory import SnapshotSource
+from vexpath_core.enums import ComponentScope, ScanMode, Severity, Verdict
+from vexpath_core.models.results import ScanResults
+from vexpath_core.protocols import FixedClock
+from vexpath_core.scan import ScanOptions, scan, scanned_lockfile
 
 CLOCK = FixedClock(datetime(2026, 11, 9, 12, 0, tzinfo=UTC))
 
@@ -153,7 +153,7 @@ def test_a_project_with_no_lockfile_fails_rather_than_reporting_clean(
     tmp_path: Path, source: SnapshotSource
 ) -> None:
     """An empty inventory would look like a clean project, which is a lie."""
-    from sscp_core.sbom import LockfileError
+    from vexpath_core.sbom import LockfileError
 
     with pytest.raises(LockfileError):
         scan(tmp_path, source, clock=CLOCK)

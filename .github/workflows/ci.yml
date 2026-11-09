@@ -69,19 +69,19 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: sscp
-          POSTGRES_PASSWORD: sscp
-          POSTGRES_DB: sscp
+          POSTGRES_USER: vexpath
+          POSTGRES_PASSWORD: vexpath
+          POSTGRES_DB: vexpath
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U sscp -d sscp"
+          --health-cmd "pg_isready -U vexpath -d vexpath"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
     env:
-      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@localhost:5432/sscp
-      SSCP_TEST_DATABASE_URL: postgresql+psycopg://sscp:sscp@localhost:5432/sscp
+      VEXPATH_DATABASE_URL: postgresql+psycopg://vexpath:vexpath@localhost:5432/vexpath
+      VEXPATH_TEST_DATABASE_URL: postgresql+psycopg://vexpath:vexpath@localhost:5432/vexpath
     steps:
       - uses: actions/checkout@v4
 
@@ -105,7 +105,7 @@ jobs:
           uv run alembic -c infra/alembic.ini check
 
       - name: Seed the frozen advisory snapshot
-        run: uv run python -m sscp_worker.main seed-advisories testdata/advisories
+        run: uv run python -m vexpath_worker.main seed-advisories testdata/advisories
 
       - name: Integration tests
         run: uv run pytest -m "integration and not network and not benchmark"
@@ -132,7 +132,7 @@ jobs:
           file: infra/Dockerfile
           push: false
           load: true
-          tags: sscp:ci
+          tags: vexpath:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -140,8 +140,8 @@ jobs:
         # Liveness must not depend on the database, so this check runs the
         # container with no Postgres anywhere near it.
         run: |
-          docker run -d --name sscp-ci -p 8000:8000 \
-            -e SSCP_ENV=test -e SSCP_SECRET_KEY=ci-only sscp:ci
+          docker run -d --name vexpath-ci -p 8000:8000 \
+            -e VEXPATH_ENV=test -e VEXPATH_SECRET_KEY=ci-only vexpath:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://localhost:8000/healthz > /tmp/health.json; then
               break
@@ -151,4 +151,4 @@ jobs:
           cat /tmp/health.json
           grep -q '"status":"ok"' /tmp/health.json
           grep -q 'PyPI' /tmp/health.json
-          docker rm -f sscp-ci
+          docker rm -f vexpath-ci

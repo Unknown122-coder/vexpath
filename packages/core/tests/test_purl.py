@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from sscp_core.purl import build_purl, normalise_name, parse_purl
+from vexpath_core.purl import build_purl, normalise_name, parse_purl
 
 
 @pytest.mark.parametrize(

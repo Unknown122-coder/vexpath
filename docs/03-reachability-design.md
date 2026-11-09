@@ -89,7 +89,7 @@ The two-level design (per-package graphs plus link-time resolution) and the sear
 
 Everything reachable must start somewhere. Default entry points, in priority order:
 
-1. Explicit `entry_points` in `.sscp.yml` (dotted symbols or file globs).
+1. Explicit `entry_points` in `.vexpath.yml` (dotted symbols or file globs).
 2. `[project.scripts]` / `console_scripts` / `package.json` `bin` and `main`.
 3. `if __name__ == "__main__":` blocks and `__main__.py`.
 4. Framework handlers: FastAPI and Flask routes, Django URL confs, management commands and signal receivers, Celery tasks, Click and Typer commands, AWS Lambda handlers (`handler` in files referenced by `serverless.yml` or `template.yaml`), ASGI/WSGI application objects. Test functions and pytest fixtures are excluded.
@@ -128,6 +128,28 @@ Confidence is reported alongside status:
 | `high` | explicit entry points, resolved edges only, symbols from fix commit with `high` confidence |
 | `medium` | inferred entry points, or `medium` symbols, or class-hierarchy edges |
 | `low` | `dynamic` edges on the path, `low`-confidence symbols, or symbols resolved only at module level |
+
+### 5.1 Malicious packages bypass reachability entirely
+
+OSV publishes a malicious-package database alongside its vulnerability data,
+using identifiers prefixed `MAL-`. These records are not vulnerabilities in
+legitimate packages, and reachability is the wrong question for them twice over:
+
+- There is no fix commit to diff, because there is no fix. The remedy is removal.
+- Installing a malicious package already runs its code, through setup hooks or
+  import-time side effects. Asking whether the application calls into it misses
+  the point.
+
+So a finding from a `MAL-` record never enters reachability analysis, is always
+reported as `affected`, and can never be cleared. This is not a limitation to
+work around; it is the correct answer.
+
+The distinction also matters for measurement. In the OSV corpus downloaded on
+2026-11-09, malicious-package records outnumbered real PyPI vulnerability
+advisories nearly two to one: 11,992 against 6,938. Counting them in the
+denominator of fix-commit coverage reported 33 % where the true figure for
+analysable advisories was 88.7 %, which would have been grounds to abandon the
+whole approach. See `docs/05-roadmap.md` M2.
 
 ## 6. Evidence
 

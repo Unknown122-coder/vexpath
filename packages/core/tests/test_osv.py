@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from sscp_core.advisory.osv import OsvRecordError, normalise, normalise_all
-from sscp_core.enums import Severity, SymbolSource, SymbolsStatus
+from vexpath_core.advisory.osv import OsvRecordError, normalise, normalise_all
+from vexpath_core.enums import Severity, SymbolSource, SymbolsStatus
 
 
 def _record(**overrides: Any) -> dict[str, Any]:

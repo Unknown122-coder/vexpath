@@ -1,13 +1,13 @@
 [project]
-name = "sscp-api"
+name = "vexpath-api"
 version = "0.0.1"
 description = "FastAPI service: the /v1 JSON API and the server-rendered web UI."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "sscp-core",
-    "sscp-platform",
-    "sscp-db",
+    "vexpath-core",
+    "vexpath-platform",
+    "vexpath-db",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "jinja2>=3.1",
@@ -19,4 +19,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sscp_api"]
+packages = ["src/vexpath_api"]

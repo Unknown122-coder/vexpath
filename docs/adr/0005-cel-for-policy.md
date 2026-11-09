@@ -9,4 +9,4 @@ Use CEL via `cel-python`. Expose a documented evaluation context (see `04-api-an
 ## Consequences
 - Non-Turing-complete: no user-defined functions; complex policies combine multiple expressions.
 - `cel-python` performance is adequate for hundreds of findings; if it becomes a bottleneck, `cel-rust` bindings are a drop-in.
-- Policies live in the repo (`.sscp.yml`) by default so they are reviewed like code; the dashboard editor writes the same text.
+- Policies live in the repo (`.vexpath.yml`) by default so they are reviewed like code; the dashboard editor writes the same text.

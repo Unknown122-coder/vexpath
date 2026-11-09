@@ -7,7 +7,7 @@ Exact versions we target. When a newer version ships, upgrading is an ADR, not a
 | Package identity | Package URL (purl) | spec as of 2025, `packageurl-python` | Canonical component key; PyPI names PEP 503-normalised, npm scoped names percent-encoded |
 | SBOM | CycloneDX | 1.6 JSON and XML (read, write); read 1.4/1.5 | Primary SBOM format; `metadata.component`, `components[]`, `dependencies[]`, `vulnerabilities[]` for CDX-VEX |
 | SBOM | SPDX | 2.2 and 2.3 JSON and tag-value (read, write) | Secondary; `DEPENDS_ON`, `CONTAINS` and `HAS_PREREQUISITE` relationships, and their inverses, become dependency edges. Identity comes from the `purl` external reference. |
-| SBOM baseline | CISA/NTIA Minimum Elements for an SBOM | 2021, with 2025 revision tracked | `sscp sbom validate` reports gaps: supplier, component name, version, unique ids, dependency relationships, author, timestamp |
+| SBOM baseline | CISA/NTIA Minimum Elements for an SBOM | 2021, with 2025 revision tracked | `vexpath sbom validate` reports gaps: supplier, component name, version, unique ids, dependency relationships, author, timestamp |
 | Vulnerability data | OSV schema | 1.6.x | Source of truth for advisories and affected ranges; `ecosystem_specific` consumed where populated |
 | Vulnerability data | GitHub Security Advisories (GraphQL) | current | Review state, CVSS 4.0, PR/commit references |
 | Vulnerability data | FIRST EPSS | v3 daily CSV | Exploit probability on findings |
@@ -25,7 +25,7 @@ Exact versions we target. When a newer version ships, upgrading is an ADR, not a
 | API | OpenAPI | 3.1 | Generated from FastAPI, committed to repo |
 | API errors | RFC 9457 Problem Details | | Error bodies |
 | Identifiers | ULID | | Primary keys |
-| Repo config | `.sscp.yml` | our schema v1 | Documented in `04-api-and-cli.md` |
+| Repo config | `.vexpath.yml` | our schema v1 | Documented in `04-api-and-cli.md` |
 
 ## Validation: what is checked against a schema, and what is not
 
@@ -43,13 +43,13 @@ malformed relationship. Stating the limit here is the point.
 
 ## Where we extend standards (documented extensions)
 
-1. **OpenVEX `impact_statement` structure.** The spec takes free text. We write human-readable text and additionally attach a CycloneDX-style `properties` block in the CDX-VEX output with `sscp:reach.status`, `sscp:reach.confidence`, `sscp:reach.symbols`, `sscp:reach.path` so machines can consume evidence.
+1. **OpenVEX `impact_statement` structure.** The spec takes free text. We write human-readable text and additionally attach a CycloneDX-style `properties` block in the CDX-VEX output with `vexpath:reach.status`, `vexpath:reach.confidence`, `vexpath:reach.symbols`, `vexpath:reach.path` so machines can consume evidence.
 2. **Vulnerable symbols.** No standard exists. Our `vulnerable_symbols` export format is JSON Lines with `{advisory, ecosystem, package, symbol, kind, source, fix_commit, confidence}` and is published under a permissive licence so others can consume or contribute.
-3. **Results schema** `sscp.results/1` (see `04-api-and-cli.md § 4`).
+3. **Results schema** `vexpath.results/1` (see `04-api-and-cli.md § 4`).
 4. **Scope and directness in CycloneDX.** CycloneDX has no development scope,
    collapsing it to `optional`, and no way to say whether a component is a
    direct dependency. Both change what a policy decides, so they are carried
-   as the properties `sscp:scope` and `sscp:direct`, and read back in
+   as the properties `vexpath:scope` and `vexpath:direct`, and read back in
    preference to the standard field. Inventory limitations travel as
-   `sscp:note` properties, so a consumer holding only the document still
+   `vexpath:note` properties, so a consumer holding only the document still
    learns what it could not determine.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from sscp_platform.settings import Environment, LogFormat, Settings
+from vexpath_platform.settings import Environment, LogFormat, Settings
 
 
 def test_defaults_are_local_development(clean_environment: None) -> None:
@@ -32,8 +32,8 @@ def test_interactive_api_docs_are_closed_in_production(clean_environment: None) 
 def test_settings_come_from_prefixed_environment_variables(
     clean_environment: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("SSCP_LOG_LEVEL", "DEBUG")
-    monkeypatch.setenv("SSCP_S3_BUCKET", "other-bucket")
+    monkeypatch.setenv("VEXPATH_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("VEXPATH_S3_BUCKET", "other-bucket")
     settings = Settings()
     assert settings.log_level == "DEBUG"
     assert settings.s3_bucket == "other-bucket"
@@ -44,5 +44,5 @@ def test_unknown_variables_are_ignored(
 ) -> None:
     # The process environment is full of unrelated variables; one of them must
     # not stop the application from starting.
-    monkeypatch.setenv("SSCP_SOMETHING_WE_REMOVED", "1")
+    monkeypatch.setenv("VEXPATH_SOMETHING_WE_REMOVED", "1")
     assert Settings().env is Environment.LOCAL

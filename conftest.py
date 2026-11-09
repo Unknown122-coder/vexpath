@@ -49,7 +49,7 @@ def fixture_repos_dir(testdata_dir: Path) -> Path:
 @pytest.fixture
 def frozen_clock() -> object:
     """A clock stuck at :data:`FROZEN_NOW`."""
-    from sscp_core.protocols import FixedClock
+    from vexpath_core.protocols import FixedClock
 
     return FixedClock(FROZEN_NOW)
 
@@ -62,19 +62,19 @@ def integration_database_url() -> str:
     works with no further setup.
     """
     return os.environ.get(
-        "SSCP_TEST_DATABASE_URL",
-        "postgresql+psycopg://sscp:sscp@localhost:5432/sscp",
+        "VEXPATH_TEST_DATABASE_URL",
+        "postgresql+psycopg://vexpath:vexpath@localhost:5432/vexpath",
     )
 
 
 @pytest.fixture
 def clean_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Remove ``SSCP_`` variables so a developer's .env cannot change a result.
+    """Remove ``VEXPATH_`` variables so a developer's .env cannot change a result.
 
     Without this, a test asserting a default would pass or fail depending on
     what happens to be exported in the shell that ran it.
     """
     for name in list(os.environ):
-        if name.startswith("SSCP_"):
+        if name.startswith("VEXPATH_"):
             monkeypatch.delenv(name, raising=False)
     yield

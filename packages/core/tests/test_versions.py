@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from sscp_core.models.advisory import AffectedPackage, AffectedRange, RangeEvent, RangeType
-from sscp_core.versions import (
+from vexpath_core.models.advisory import AffectedPackage, AffectedRange, RangeEvent, RangeType
+from vexpath_core.versions import (
     UnorderableVersionError,
     affects_version,
     compare,

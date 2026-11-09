@@ -13,12 +13,12 @@ make install                       # create the virtualenv and install every wor
 make check                         # lint, type-check and run the unit tests
 
 # Scan something, offline and reproducibly, against the committed test corpus.
-export SSCP_ADVISORY_SNAPSHOT_DIR=testdata/advisories
-uv run sscp scan testdata/repos/direct-call
+export VEXPATH_ADVISORY_SNAPSHOT_DIR=testdata/advisories
+uv run vexpath scan testdata/repos/direct-call
 
 # Or download a current corpus first, then scan your own project.
-uv run sscp advisory sync var/advisories
-uv run sscp scan . --snapshot var/advisories
+uv run vexpath advisory sync var/advisories
+uv run vexpath scan . --snapshot var/advisories
 
 make up                            # Postgres, migrations, API and seeded advisories
 curl localhost:8000/healthz
@@ -64,11 +64,13 @@ every run rather than letting the absence pass unnoticed.
 │   ├── core/           The analysis library. Decides verdicts. No framework, no database.
 │   ├── platform/       Configuration and logging, shared by the API and the workers
 │   ├── db/             SQLAlchemy schema, engine helpers and Alembic migrations
-│   └── cli/            The `sscp` command-line tool, built on core
+│   └── cli/            The `vexpath` command-line tool, built on core
 ├── infra/              Dockerfile, Docker Compose, Alembic config, deployment manifests
 ├── tools/              Developer scripts
 ├── docs/               This blueprint
 └── testdata/           Frozen advisory snapshot, fixture SBOMs, six fixture repositories
 ```
 
-`sscp` is a placeholder command name until the product is named.
+The name is settled and recorded in [ADR-0013](docs/adr/0013-the-name-vexpath.md):
+**VEX** is the signed exploitability document this tool emits, and **path** is
+the call path that is the evidence behind every verdict.

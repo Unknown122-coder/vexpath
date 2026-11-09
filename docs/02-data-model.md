@@ -126,7 +126,7 @@ Standard. `api_keys.key_hash` is SHA-256 of the secret; the secret is shown once
 | repo_url | text null | |
 | default_branch | text | |
 | visibility | text | `private` / `public` |
-| entry_points | jsonb | overrides from `.sscp.yml` |
+| entry_points | jsonb | overrides from `.vexpath.yml` |
 | settings | jsonb | |
 
 ### `scans`
@@ -137,7 +137,7 @@ Standard. `api_keys.key_hash` is SHA-256 of the secret; the secret is shown once
 | mode | text | `cli` / `action` / `hosted` |
 | git_ref, git_sha | text null | |
 | advisory_snapshot_id | FK advisory_snapshots | reproducibility |
-| core_version | text | version of `sscp_core` that produced the verdicts |
+| core_version | text | version of `vexpath_core` that produced the verdicts |
 | status | text | `queued` / `running` / `completed` / `failed` |
 | summary | jsonb | counts by verdict × severity, for fast listing |
 | diff_vs_previous | jsonb | `{new_reachable: [...], resolved: [...], newly_unreachable: [...]}` |
@@ -151,7 +151,7 @@ Standard. `api_keys.key_hash` is SHA-256 of the secret; the secret is shown once
 | format | text | `cyclonedx-1.6-json` / `spdx-2.3-json` / … |
 | object_key | text | original document in object storage |
 | document_hash | text | sha256 |
-| generated_by | text | `sscp` / `syft` / `uploaded` |
+| generated_by | text | `vexpath` / `syft` / `uploaded` |
 | component_count | int | |
 
 ### `components`
@@ -239,7 +239,7 @@ Materialised OpenVEX statements, one per finding, plus the full document in obje
 | name | text | |
 | cel | text | policy source |
 | version | int | incremented on change |
-| source | text | `repo` (from `.sscp.yml`) / `dashboard` |
+| source | text | `repo` (from `.vexpath.yml`) / `dashboard` |
 
 ### `policy_evaluations`
 `(scan_id, policy_id, passed boolean, violations jsonb, evaluated_at)`.

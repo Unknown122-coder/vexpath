@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from sscp_core.enums import ComponentScope, SbomFormat, SbomGenerator
-from sscp_core.protocols import FixedClock
-from sscp_core.sbom import (
+from vexpath_core.enums import ComponentScope, SbomFormat, SbomGenerator
+from vexpath_core.protocols import FixedClock
+from vexpath_core.sbom import (
     UnknownSbomFormatError,
     cyclonedx,
     generate_sbom,
@@ -25,9 +25,9 @@ from sscp_core.sbom import (
     minimum_elements,
     spdx,
 )
-from sscp_core.sbom.cyclonedx import CycloneDxError
-from sscp_core.sbom.lockfiles import LockfileError
-from sscp_core.sbom.spdx import SpdxError
+from vexpath_core.sbom.cyclonedx import CycloneDxError
+from vexpath_core.sbom.lockfiles import LockfileError
+from vexpath_core.sbom.spdx import SpdxError
 
 CLOCK = FixedClock(datetime(2026, 11, 9, 12, 0, tzinfo=UTC))
 LATER = FixedClock(datetime(2027, 3, 1, 9, 30, tzinfo=UTC))
@@ -292,7 +292,7 @@ def test_spdx_tag_value_is_read() -> None:
         SPDXID: SPDXRef-DOCUMENT
         DocumentName: example
         DocumentNamespace: https://example.invalid/spdx/example
-        Creator: Tool: sscp-0.0.1
+        Creator: Tool: vexpath-0.0.1
         Created: 2026-11-09T00:00:00Z
 
         PackageName: requests

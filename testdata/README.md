@@ -4,7 +4,7 @@ Everything the test suite needs in order to run with no network access and produ
 
 ## `advisories/` — the frozen advisory snapshot
 
-A snapshot directory in the format `sscp_core.snapshot` reads:
+A snapshot directory in the format `vexpath_core.snapshot` reads:
 
 ```
 snapshot.json      metadata: id, created_at, content_sha256, ecosystems, counts

@@ -78,7 +78,7 @@ Non-persona for v1: large enterprises needing on-prem deployment, SSO, and SLAs.
    - Documentation site.
 
 7. **Distribution**
-   - `sscp` CLI on PyPI.
+   - `vexpath` CLI on PyPI.
    - GitHub Action on the Marketplace.
    - Docker image.
 

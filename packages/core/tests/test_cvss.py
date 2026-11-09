@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from sscp_core.cvss import (
+from vexpath_core.cvss import (
     InvalidCvssVectorError,
     base_score,
     parse_vector,
@@ -17,7 +17,7 @@ from sscp_core.cvss import (
     try_base_score,
     vector_version,
 )
-from sscp_core.enums import Severity
+from vexpath_core.enums import Severity
 
 
 @pytest.mark.parametrize(

@@ -57,13 +57,13 @@ regen-snapshot: ## Rebuild the frozen test advisory snapshot from tools/build_te
 	$(UV) run python tools/build_test_snapshot.py
 
 seed-advisories: ## Load the frozen test advisory snapshot into the local database
-	$(UV) run python -m sscp_worker.main seed-advisories testdata/advisories
+	$(UV) run python -m vexpath_worker.main seed-advisories testdata/advisories
 
 api: ## Run the API and HTML UI with reload, outside Docker
-	$(UV) run uvicorn sscp_api.main:app --reload --port 8000
+	$(UV) run uvicorn vexpath_api.main:app --reload --port 8000
 
 worker: ## Show the worker's available jobs
-	$(UV) run python -m sscp_worker.main --help
+	$(UV) run python -m vexpath_worker.main --help
 
 clean: ## Remove caches and build artefacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage coverage.xml

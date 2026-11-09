@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from sscp_core.advisory.source import SnapshotSource
-from sscp_core.enums import (
+from vexpath_core.advisory.source import SnapshotSource
+from vexpath_core.enums import (
     ComponentScope,
     SbomFormat,
     SbomGenerator,
@@ -22,16 +22,16 @@ from sscp_core.enums import (
     SymbolsStatus,
     Verdict,
 )
-from sscp_core.models.advisory import (
+from vexpath_core.models.advisory import (
     Advisory,
     AffectedPackage,
     AffectedRange,
     RangeEvent,
     RangeType,
 )
-from sscp_core.models.sbom import Component, Sbom
-from sscp_core.purl import build_purl
-from sscp_core.vulnmatch import match, summarise_by_severity
+from vexpath_core.models.sbom import Component, Sbom
+from vexpath_core.purl import build_purl
+from vexpath_core.vulnmatch import match, summarise_by_severity
 
 NOW = datetime(2026, 11, 9, tzinfo=UTC)
 
@@ -61,7 +61,7 @@ def _sbom(*components: Component) -> Sbom:
         format=SbomFormat.CYCLONEDX_1_6_JSON,
         spec_version="1.6",
         document_sha256="0" * 64,
-        generated_by=SbomGenerator.SSCP,
+        generated_by=SbomGenerator.VEXPATH,
         created_at=NOW,
         components=components,
     )
@@ -303,8 +303,8 @@ def test_severity_summary_includes_empty_buckets() -> None:
 
 
 def test_the_fixture_snapshot_matches_the_fixture_sbom(snapshot_dir: Path, sboms_dir: Path) -> None:
-    from sscp_core.protocols import FixedClock
-    from sscp_core.sbom import load
+    from vexpath_core.protocols import FixedClock
+    from vexpath_core.sbom import load
 
     sbom = load(sboms_dir / "direct-call.cdx-1.6.json", clock=FixedClock(NOW))
     report = match(sbom, SnapshotSource(snapshot_dir))
@@ -331,7 +331,7 @@ def test_a_malformed_purl_yields_an_empty_answer_not_a_crash(snapshot_dir: Path)
 
 
 def test_a_live_source_declares_itself_unreproducible() -> None:
-    from sscp_core.advisory import OsvApiSource
+    from vexpath_core.advisory import OsvApiSource
 
     with OsvApiSource() as source:
         assert source.snapshot_id is None

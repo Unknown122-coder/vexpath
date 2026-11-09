@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from sscp.exit_codes import ExitCode
-from sscp.main import app
+from vexpath.exit_codes import ExitCode
+from vexpath.main import app
 
 runner = CliRunner()
 
@@ -22,7 +22,7 @@ runner = CliRunner()
 @pytest.fixture
 def env(snapshot_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point the CLI at the frozen snapshot, so tests are offline."""
-    monkeypatch.setenv("SSCP_ADVISORY_SNAPSHOT_DIR", str(snapshot_dir))
+    monkeypatch.setenv("VEXPATH_ADVISORY_SNAPSHOT_DIR", str(snapshot_dir))
 
 
 # --- Contract --------------------------------------------------------------
@@ -43,7 +43,7 @@ def test_version_reports_capabilities_alongside_versions() -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["reachability_ecosystems"] == ["PyPI"]
-    assert payload["results_schema"] == "sscp.results/1"
+    assert payload["results_schema"] == "vexpath.results/1"
     # The build states that reachability is unavailable rather than letting a
     # reader assume a verdict was reachability-informed.
     assert payload["reachability_available"] is False
@@ -181,7 +181,7 @@ def test_scan_json_output_matches_the_results_schema(env: None, fixture_repos_di
         app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json"]
     )
     payload = json.loads(result.stdout)
-    assert payload["schema"] == "sscp.results/1"
+    assert payload["schema"] == "vexpath.results/1"
     assert payload["advisory_snapshot_id"] == "test-snapshot-0001"
     assert payload["findings"][0]["advisory"]["id"] == "CVE-2024-35195"
 
@@ -217,14 +217,14 @@ def test_scan_names_the_snapshot_it_used(env: None, fixture_repos_dir: Path) -> 
 def test_scan_warns_when_it_has_no_snapshot(
     fixture_repos_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("SSCP_ADVISORY_SNAPSHOT_DIR", raising=False)
+    monkeypatch.delenv("VEXPATH_ADVISORY_SNAPSHOT_DIR", raising=False)
     # Point the live source at a port nothing listens on, so the command fails
     # fast rather than reaching the internet.
-    monkeypatch.setenv("SSCP_OSV_API_BASE", "http://127.0.0.1:1")
+    monkeypatch.setenv("VEXPATH_OSV_API_BASE", "http://127.0.0.1:1")
     result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call")])
     assert "will not be reproducible" in result.stderr
     assert result.exit_code == int(ExitCode.ANALYSIS_ERROR)
-    assert "sscp advisory sync" in result.stderr
+    assert "vexpath advisory sync" in result.stderr
 
 
 def test_scan_can_analyse_a_supplied_sbom(env: None, sboms_dir: Path, tmp_path: Path) -> None:
@@ -288,11 +288,22 @@ def test_advisory_show_fails_clearly_for_an_unknown_identifier(env: None) -> Non
     assert "is not in the snapshot" in result.stderr
 
 
-def test_advisory_coverage_reports_symbol_coverage(env: None) -> None:
+def test_advisory_coverage_reports_both_numbers(env: None) -> None:
     result = runner.invoke(app, ["advisory", "coverage"])
     assert result.exit_code == 0
     assert "PyPI" in result.stdout
-    assert "COVERAGE" in result.stdout
+    # Symbol coverage and fix-reference coverage mean different things, and the
+    # report has to distinguish them or it misleads.
+    assert "SYMBOLS" in result.stdout
+    assert "FIX" in result.stdout
+    assert "ANALYSABLE" in result.stdout
+    assert "How a fix commit would be recovered" in result.stdout
+
+
+def test_advisory_coverage_explains_what_it_excludes(env: None) -> None:
+    result = runner.invoke(app, ["advisory", "coverage"])
+    assert "malicious-package records" in result.stdout
+    assert "withdrawn" in result.stdout
 
 
 def test_advisory_coverage_json_is_machine_readable(env: None) -> None:
@@ -304,7 +315,7 @@ def test_advisory_coverage_json_is_machine_readable(env: None) -> None:
 
 
 def test_advisory_commands_need_a_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SSCP_ADVISORY_SNAPSHOT_DIR", raising=False)
+    monkeypatch.delenv("VEXPATH_ADVISORY_SNAPSHOT_DIR", raising=False)
     result = runner.invoke(app, ["advisory", "coverage"])
     assert result.exit_code == int(ExitCode.ANALYSIS_ERROR)
     assert "no snapshot given" in result.stderr

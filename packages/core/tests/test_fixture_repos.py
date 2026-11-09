@@ -18,9 +18,9 @@ from typing import Any
 import pytest
 import yaml
 
-from sscp_core.enums import ReachStatus, Verdict, VexJustification
-from sscp_core.purl import parse_purl
-from sscp_core.snapshot import read_snapshot
+from vexpath_core.enums import ReachStatus, Verdict, VexJustification
+from vexpath_core.purl import parse_purl
+from vexpath_core.snapshot import read_snapshot
 
 EXPECTED_FIXTURES = {
     "direct-call",

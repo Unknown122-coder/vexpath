@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from sscp_core import RESULTS_SCHEMA
-from sscp_core.enums import (
+from vexpath_core import RESULTS_SCHEMA
+from vexpath_core.enums import (
     Confidence,
     ReachStatus,
     SbomFormat,
@@ -21,21 +21,21 @@ from sscp_core.enums import (
     Verdict,
     VexJustification,
 )
-from sscp_core.models.finding import (
+from vexpath_core.models.finding import (
     AdvisoryRef,
     CallPathStep,
     ComponentRef,
     Finding,
     ReachabilityResult,
 )
-from sscp_core.models.results import (
+from vexpath_core.models.results import (
     PolicyResult,
     PolicyViolation,
     ProjectRef,
     SbomRef,
     ScanResults,
 )
-from sscp_core.report import render_markdown, render_sarif, render_text
+from vexpath_core.report import render_markdown, render_sarif, render_text
 
 NOW = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
 

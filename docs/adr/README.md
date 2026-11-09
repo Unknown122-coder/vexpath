@@ -16,3 +16,4 @@ Format: context, decision, consequences. Status is `accepted` unless stated. Sup
 | [0010](0010-local-first-analysis.md) | Local/CI analysis is the primary mode; hosted scanning is secondary |
 | [0011](0011-server-rendered-python-web.md) | Server-rendered Python web UI inside the API application (supersedes 0004) |
 | [0012](0012-python-only-reachability.md) | Python is the only reachability ecosystem in v1 |
+| [0013](0013-the-name-vexpath.md) | The name is `vexpath` |

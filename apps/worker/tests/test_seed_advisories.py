@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import func, select
 
-from sscp_db.engine import create_sync_engine
-from sscp_db.tables import advisories, advisory_affected, advisory_snapshots, vulnerable_symbols
-from sscp_worker.jobs.seed_advisories import seed_snapshot
+from vexpath_db.engine import create_sync_engine
+from vexpath_db.tables import advisories, advisory_affected, advisory_snapshots, vulnerable_symbols
+from vexpath_worker.jobs.seed_advisories import seed_snapshot
 
 if TYPE_CHECKING:
     from sqlalchemy import Engine

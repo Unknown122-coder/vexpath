@@ -42,7 +42,7 @@ flowchart LR
 |---|---|
 | Forged results ("I ran the scan, trust me, everything is unreachable") | Uploaded results are labelled by `mode`; attestation signatures are **re-verified server-side** against Rekor and the stated identity; the public report shows the signer identity and whether verification passed. Unsigned uploads are shown as "self-reported". |
 | Contributed call graphs poisoned to hide edges | `PUT /callgraphs/...` only *requests* a build; the server rebuilds from the official archive and publishes its own output. Client graphs are never served to others. |
-| API key leakage | Keys prefixed `sscp_live_` so secret scanners can detect them; GitHub secret-scanning partner registration post-launch; hashed at rest; rotation and last-used tracking; scoped to one org |
+| API key leakage | Keys prefixed `vexpath_live_` so secret scanners can detect them; GitHub secret-scanning partner registration post-launch; hashed at rest; rotation and last-used tracking; scoped to one org |
 | Oversized or abusive uploads | Size caps, rate limits per key, per-org storage quotas |
 
 ### B4 · Database

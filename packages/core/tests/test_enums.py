@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sscp_core.enums import (
+from vexpath_core.enums import (
     REACHABILITY_ECOSYSTEMS,
     VERDICT_TO_CYCLONEDX_STATE,
     Confidence,
