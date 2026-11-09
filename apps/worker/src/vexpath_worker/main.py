@@ -21,6 +21,11 @@ from vexpath_db.engine import create_sync_engine
 from vexpath_platform.logging import configure_logging, get_logger
 from vexpath_platform.settings import get_settings
 from vexpath_worker import __version__
+from vexpath_worker.jobs.extract_symbols import (
+    DEFAULT_BATCH,
+    extract_symbols,
+    extraction_backlog,
+)
 from vexpath_worker.jobs.seed_advisories import seed_snapshot
 from vexpath_worker.jobs.sync_advisories import refresh_advisories
 
@@ -124,6 +129,77 @@ def sync_advisories(
         typer.secho(concern, fg=typer.colors.YELLOW, err=True)
     if fail_on_low_coverage and report.coverage_concerns:
         raise typer.Exit(code=1)
+
+
+@app.command("extract-symbols")
+def extract_symbols_command(
+    ecosystem: Annotated[
+        str,
+        typer.Option(
+            "--ecosystem",
+            "-e",
+            help="Which ecosystem to extract for. Only PyPI is implemented (ADR-0012).",
+        ),
+    ] = "PyPI",
+    batch: Annotated[
+        int,
+        typer.Option(
+            "--batch",
+            "-n",
+            min=1,
+            help=(
+                "How many advisories to attempt. Bounded so a scheduled run "
+                "finishes in a predictable window."
+            ),
+        ),
+    ] = DEFAULT_BATCH,
+    cache_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--cache-root",
+            file_okay=False,
+            help=(
+                "Where to keep bare repositories between fetches. Reusing one "
+                "across runs turns most fetches into incremental ones."
+            ),
+        ),
+    ] = None,
+    show_backlog: Annotated[
+        bool,
+        typer.Option("--backlog/--no-backlog", help="Print what is still waiting afterwards."),
+    ] = True,
+) -> None:
+    """Extract vulnerable symbols from advisories' fix commits.
+
+    This is what turns an advisory into something a reachability search can
+    look for. Without it every finding reports no_fix_commit and nothing can
+    ever be cleared.
+
+    The run is bounded and resumable: each advisory's outcome is committed as
+    it is decided, so stopping this job costs the advisory in flight and
+    nothing else. Run it repeatedly until the backlog stops shrinking.
+
+    It reaches the network, fetching each fix commit into a bare repository
+    with no checkout and hooks disabled. Nothing from a fetched repository is
+    ever executed.
+    """
+    settings = get_settings()
+    configure_logging(settings)
+    engine = create_sync_engine(settings.database_url)
+    try:
+        report = extract_symbols(engine, ecosystem=ecosystem, batch=batch, cache_root=cache_root)
+        typer.echo(report.summary_line())
+        if show_backlog:
+            backlog = extraction_backlog(engine, ecosystem=ecosystem)
+            typer.echo(
+                "backlog: "
+                + ", ".join(f"{state} {count}" for state, count in sorted(backlog.items()))
+            )
+    finally:
+        engine.dispose()
+
+    for advisory_id, reason in sorted(report.problems.items())[:10]:
+        typer.secho(f"{advisory_id}: {reason}", fg=typer.colors.YELLOW, err=True)
 
 
 @app.command()

@@ -13,6 +13,7 @@ import pytest
 
 from vexpath_core.advisory.osv import OsvRecordError, normalise, normalise_all
 from vexpath_core.enums import Severity, SymbolSource, SymbolsStatus
+from vexpath_core.versions import affects_version
 
 
 def _record(**overrides: Any) -> dict[str, Any]:
@@ -227,3 +228,55 @@ def test_timestamps_become_aware_datetimes() -> None:
     assert advisory.published_at is not None
     assert advisory.published_at.tzinfo is not None
     assert advisory.modified_at is not None
+
+
+def test_two_affected_entries_for_one_package_are_merged() -> None:
+    """Found by loading the real corpus, where CVE-2014-3555 does this.
+
+    OSV publishes a second entry for the same package when its ranges come
+    from a different source. Matching evaluates the first entry that names a
+    package and never looks at the rest, so leaving them separate loses every
+    finding covered only by the second, with no error anywhere.
+    """
+    advisory = normalise(
+        {
+            "id": "CVE-2014-3555",
+            "affected": [
+                {
+                    "package": {"ecosystem": "PyPI", "name": "neutron"},
+                    "versions": ["2013.2.1", "2013.2.2"],
+                },
+                {
+                    "package": {"ecosystem": "PyPI", "name": "neutron"},
+                    "ranges": [
+                        {
+                            "type": "ECOSYSTEM",
+                            "events": [{"introduced": "0"}, {"fixed": "2014.1.2"}],
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert len(advisory.affected) == 1
+    package = advisory.affected[0]
+    # The union of both entries, not whichever came first.
+    assert package.versions == ("2013.2.1", "2013.2.2")
+    assert package.fixed_versions == ("2014.1.2",)
+    assert affects_version(package, "2013.2.1")
+    assert affects_version(package, "2013.5.0")
+    assert not affects_version(package, "2014.1.2")
+
+
+def test_entries_for_different_packages_stay_separate() -> None:
+    advisory = normalise(
+        {
+            "id": "CVE-2026-0001",
+            "affected": [
+                {"package": {"ecosystem": "PyPI", "name": "one"}, "versions": ["1.0"]},
+                {"package": {"ecosystem": "PyPI", "name": "two"}, "versions": ["2.0"]},
+            ],
+        }
+    )
+    assert {package.name for package in advisory.affected} == {"one", "two"}

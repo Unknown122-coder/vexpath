@@ -263,6 +263,11 @@ def _affected_packages(record: dict[str, Any]) -> tuple[AffectedPackage, ...]:
         msg = "'affected' must be an array"
         raise OsvRecordError(msg)
 
+    # OSV publishes more than one ``affected`` entry for the same package when
+    # its ranges come from different sources: one enumerating versions,
+    # another giving an introduced/fixed range. They are emitted here as they
+    # are read; the ``Advisory`` model merges them, so every way of building an
+    # advisory gets the same treatment rather than only this one.
     packages: list[AffectedPackage] = []
     for entry in raw_affected:
         if not isinstance(entry, dict):
@@ -279,18 +284,19 @@ def _affected_packages(record: dict[str, Any]) -> tuple[AffectedPackage, ...]:
         # "Debian:11" or "Alpine:v3.18". The base name is what matters here.
         ecosystem = canonical_ecosystem(str(ecosystem_raw).split(":", 1)[0])
         normalised_name = normalise_name(ecosystem, str(name))
+        ranges = _ranges(entry)
+        versions = tuple(dict.fromkeys(str(version) for version in entry.get("versions", []) or []))
 
         packages.append(
             AffectedPackage(
                 ecosystem=ecosystem,
                 name=normalised_name,
                 purl_base=build_purl(ecosystem, normalised_name),
-                ranges=_ranges(entry),
-                versions=tuple(
-                    dict.fromkeys(str(version) for version in entry.get("versions", []) or [])
-                ),
+                ranges=ranges,
+                versions=versions,
             )
         )
+
     return tuple(packages)
 
 

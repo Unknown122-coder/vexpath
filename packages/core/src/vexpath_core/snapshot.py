@@ -31,6 +31,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from vexpath_core import __version__ as core_version
 from vexpath_core.models.advisory import Advisory, AdvisorySnapshot
 
 SNAPSHOT_METADATA_FILE = "snapshot.json"
@@ -151,13 +152,36 @@ def read_snapshot(
             advisory.source_sha256 for advisory in resolved if advisory.source_sha256
         )
         if computed != metadata.content_sha256:
-            msg = (
-                f"snapshot {metadata.id} does not match its contents: "
-                f"recorded {metadata.content_sha256}, computed {computed}"
-            )
-            raise SnapshotIntegrityError(msg)
+            raise SnapshotIntegrityError(_mismatch_message(metadata, computed))
 
     return metadata, resolved
+
+
+def _mismatch_message(metadata: AdvisorySnapshot, computed: str) -> str:
+    """Explain a hash mismatch in terms of its likely cause.
+
+    The content hash covers the *normalised* advisory records, so improving
+    normalisation changes the hash of a corpus whose bytes never moved. That is
+    the ordinary case and it has an obvious remedy. Corruption or tampering is
+    the rare case and has a different one. Reporting both the same way sends a
+    reader hunting for damage that is not there.
+    """
+    written_by = metadata.core_version
+    if written_by is not None and written_by != core_version:
+        return (
+            f"snapshot {metadata.id} was normalised by vexpath-core {written_by} "
+            f"and this is {core_version}. The content hash covers the normalised "
+            f"records, so a normalisation change alters it even though the data "
+            f"is unchanged. Re-run 'vexpath advisory sync' to rebuild the "
+            f"snapshot with this version."
+        )
+    return (
+        f"snapshot {metadata.id} does not match its contents: recorded "
+        f"{metadata.content_sha256}, computed {computed}. Either the files were "
+        f"modified after being written, or they were produced by a build that "
+        f"did not record its version. Re-sync rather than trusting it: a "
+        f"corrupted corpus changes verdicts."
+    )
 
 
 def write_snapshot(
@@ -179,6 +203,9 @@ def write_snapshot(
             ),
             "counts": summarise(ordered),
             "ecosystems": tuple(sorted(summarise(ordered))),
+            # Always this build, never whatever the caller passed: the hash
+            # just computed describes this version's normalisation.
+            "core_version": core_version,
         }
     )
 

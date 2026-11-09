@@ -34,6 +34,7 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -101,6 +102,16 @@ advisories = Table(
     # 'extracted' to everything else is the metric the product's usefulness
     # rests on, so it is a first-class column rather than a derived count.
     Column("symbols_status", String(32), nullable=False, server_default=SymbolsStatus.PENDING),
+    # Why the status is what it is, in plain language. A finding that stays
+    # under investigation because its fix commit could not be fetched is a
+    # different problem from one whose fix changed no Python, and a reader
+    # needs to be able to tell which without re-running anything.
+    Column("symbols_detail", Text(), nullable=True),
+    # Extraction reaches the network, so it fails for transient reasons.
+    # Counting attempts is what stops a permanently broken advisory from being
+    # retried on every run forever while starving the ones never tried.
+    Column("symbols_attempts", SmallInteger(), nullable=False, server_default="0"),
+    Column("symbols_attempted_at", DateTime(timezone=True), nullable=True),
     Column("source_sha256", String(64), nullable=True),
     Column("synced_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     _check("symbols_status", SymbolsStatus, "symbols_status"),
@@ -108,6 +119,15 @@ advisories = Table(
     Index("ix_advisories_kev", "kev", postgresql_where=text("kev")),
     Index("ix_advisories_symbols_status", "symbols_status"),
     Index("ix_advisories_modified_at", "modified_at"),
+    # The extraction work queue: advisories still awaiting symbols, fewest
+    # attempts first. A partial index keeps it small as the corpus grows, since
+    # most rows leave the queue permanently once extracted.
+    Index(
+        "ix_advisories_extraction_queue",
+        "symbols_attempts",
+        "modified_at",
+        postgresql_where=text("symbols_status IN ('pending', 'failed')"),
+    ),
 )
 
 

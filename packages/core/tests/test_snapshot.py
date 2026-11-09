@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -152,6 +153,81 @@ def test_tampering_is_detected(tmp_path: Path) -> None:
     # that is already known to be inconsistent.
     _, advisories = read_snapshot(tmp_path, verify=False)
     assert advisories[0].summary == "Harmless"
+
+
+def test_a_snapshot_records_the_build_that_normalised_it(tmp_path: Path) -> None:
+    """The content hash covers normalised records, so the build matters."""
+    from vexpath_core import __version__ as core_version
+
+    stored = write_snapshot(
+        tmp_path,
+        AdvisorySnapshot(
+            id="versioned",
+            created_at=datetime(2026, 11, 9, tzinfo=UTC),
+            content_sha256="0" * 64,
+            core_version="something-else",
+            ecosystems=(),
+        ),
+        [_advisory()],
+    )
+    # Always the build that wrote it, never what the caller claimed.
+    assert stored.core_version == core_version
+    assert read_snapshot(tmp_path)[0].core_version == core_version
+
+
+def test_a_snapshot_from_another_build_says_to_re_sync(tmp_path: Path) -> None:
+    """Changing normalisation alters the hash of an unchanged corpus.
+
+    Reported as corruption, that sends someone hunting for damage that is not
+    there. The remedy is a re-sync, and the message has to say so.
+    """
+    write_snapshot(
+        tmp_path,
+        AdvisorySnapshot(
+            id="older-build",
+            created_at=datetime(2026, 11, 9, tzinfo=UTC),
+            content_sha256="0" * 64,
+            ecosystems=(),
+        ),
+        [_advisory()],
+    )
+    metadata_path = tmp_path / "snapshot.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["core_version"] = "0.0.0-older"
+    payload["content_sha256"] = "f" * 64
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SnapshotIntegrityError, match="advisory sync") as raised:
+        read_snapshot(tmp_path)
+    assert "0.0.0-older" in str(raised.value)
+    assert "corrupt" not in str(raised.value).lower()
+
+
+def test_a_snapshot_with_no_recorded_build_is_reported_as_possibly_tampered(
+    tmp_path: Path,
+) -> None:
+    """Absent a version, the cause cannot be narrowed, so neither is claimed."""
+    write_snapshot(
+        tmp_path,
+        AdvisorySnapshot(
+            id="anonymous",
+            created_at=datetime(2026, 11, 9, tzinfo=UTC),
+            content_sha256="0" * 64,
+            ecosystems=(),
+        ),
+        [_advisory()],
+    )
+    path = tmp_path / ADVISORIES_FILE
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("Example", "Harmless"), encoding="utf-8"
+    )
+    metadata_path = tmp_path / "snapshot.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["core_version"] = None
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SnapshotIntegrityError, match="modified after being written"):
+        read_snapshot(tmp_path)
 
 
 def test_a_corrupt_line_names_its_line_number(tmp_path: Path) -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 from enum import StrEnum
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from vexpath_core.enums import Confidence, Severity, SymbolKind, SymbolSource, SymbolsStatus
 from vexpath_core.models.common import Base, CvssScore, Reference
@@ -139,6 +139,50 @@ class Advisory(Base):
     #: SHA-256 of the normalised source record, for change detection on sync.
     source_sha256: str | None = None
 
+    @field_validator("affected", mode="after")
+    @classmethod
+    def _one_entry_per_package(
+        cls, packages: tuple[AffectedPackage, ...]
+    ) -> tuple[AffectedPackage, ...]:
+        """Merge several entries for the same package into one.
+
+        OSV publishes two or more ``affected`` entries for one package when its
+        ranges come from different sources: one enumerating known-bad versions,
+        another giving an introduced/fixed range. CVE-2014-3555 does exactly
+        this for ``neutron``.
+
+        Left separate, that loses findings silently. Matching looks up the
+        advisory's entry for a component and evaluates the first one that names
+        the package, so a version covered only by a later entry produces no
+        finding at all, with no error anywhere. The database's unique
+        constraint on (advisory, ecosystem, package) refuses the duplicate too.
+
+        The merge is the union of both entries' ranges and versions, never the
+        first or the last: each entry describes versions that are genuinely
+        affected, so dropping either narrows the advisory.
+
+        Enforced here rather than in the OSV parser so that an advisory read
+        back from a snapshot written by an older build is corrected on the way
+        in, and no code path can construct an advisory that breaks the rule.
+        """
+        if len(packages) < 2:
+            return packages
+
+        merged: dict[tuple[str, str], AffectedPackage] = {}
+        for package in packages:
+            key = (package.ecosystem, package.name)
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = package
+                continue
+            merged[key] = existing.model_copy(
+                update={
+                    "ranges": (*existing.ranges, *package.ranges),
+                    "versions": tuple(dict.fromkeys((*existing.versions, *package.versions))),
+                }
+            )
+        return tuple(merged.values())
+
     @property
     def is_withdrawn(self) -> bool:
         return self.withdrawn_at is not None
@@ -200,6 +244,13 @@ class AdvisorySnapshot(Base):
     created_at: AwareDatetime
     #: Hash over every advisory's ``source_sha256``, sorted.
     content_sha256: str
+    #: Version of ``vexpath-core`` that normalised these records. The content
+    #: hash covers the normalised form, so a change to normalisation changes
+    #: the hash of an unchanged corpus. Recording the build that wrote it is
+    #: what lets a hash mismatch be reported as "written by a different
+    #: version, re-sync" rather than as corruption, which sends a reader
+    #: looking for a problem that is not there.
+    core_version: str | None = None
     ecosystems: tuple[str, ...]
     #: Per ecosystem: total advisories and how many have vulnerable symbols.
     #: Symbol coverage is the metric the product's usefulness rests on.

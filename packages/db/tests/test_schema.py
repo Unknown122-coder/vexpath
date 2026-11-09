@@ -7,9 +7,15 @@ Postgres are marked ``integration``.
 
 from __future__ import annotations
 
+import ast
+import re
+from enum import StrEnum
+from pathlib import Path
+
 import pytest
 from sqlalchemy import create_engine, inspect
 
+import vexpath_db
 from vexpath_core.enums import Confidence, SymbolKind, SymbolSource, SymbolsStatus
 from vexpath_db.engine import normalise_url
 from vexpath_db.tables import GLOBAL_TABLES, metadata
@@ -55,15 +61,21 @@ def test_lookup_indexes_exist_for_the_matching_join() -> None:
         assert ("ecosystem", "package_name") in indexed, table
 
 
-@pytest.mark.parametrize(
-    ("table", "column", "enum_cls"),
-    [
-        ("advisories", "symbols_status", SymbolsStatus),
-        ("vulnerable_symbols", "kind", SymbolKind),
-        ("vulnerable_symbols", "source", SymbolSource),
-        ("vulnerable_symbols", "confidence", Confidence),
-    ],
-)
+#: Every column whose values are a closed vocabulary, and the enum that
+#: defines it. Used by both the table check and the migration check, so the two
+#: cannot cover different sets of columns.
+_ENUM_COLUMNS: list[tuple[str, str, type[StrEnum]]] = [
+    ("advisories", "symbols_status", SymbolsStatus),
+    ("vulnerable_symbols", "kind", SymbolKind),
+    ("vulnerable_symbols", "source", SymbolSource),
+    ("vulnerable_symbols", "confidence", Confidence),
+]
+
+#: Where the frozen migration scripts live.
+ROOT_MIGRATIONS = Path(vexpath_db.__file__).parent / "migrations" / "versions"
+
+
+@pytest.mark.parametrize(("table", "column", "enum_cls"), _ENUM_COLUMNS)
 def test_enumerated_columns_are_constrained_to_the_python_enum(
     table: str, column: str, enum_cls: type
 ) -> None:
@@ -77,6 +89,79 @@ def test_enumerated_columns_are_constrained_to_the_python_enum(
     clause = str(constraints[0].sqltext)  # type: ignore[attr-defined]
     for member in enum_cls:  # type: ignore[var-annotated]
         assert f"'{member.value}'" in clause, f"{member.value} missing from {table}.{column}"
+
+
+def _declared_check_constraints() -> dict[str, str]:
+    """Every check constraint the migrations' ``upgrade`` functions create.
+
+    Maps constraint name to its predicate, last declaration winning, since a
+    later migration may widen an earlier constraint.
+
+    Only ``upgrade`` is read: a ``downgrade`` recreates the *previous*
+    constraint, so including it would conclude the schema is whatever the last
+    rollback path says. And only check constraints are read: an index predicate
+    can mention the same column with the same ``IN`` syntax without
+    constraining anything.
+    """
+    found: dict[str, str] = {}
+    for path in sorted(ROOT_MIGRATIONS.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        upgrades = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "upgrade"
+        ]
+        for upgrade in upgrades:
+            for node in ast.walk(upgrade):
+                if not isinstance(node, ast.Call):
+                    continue
+                called = (
+                    node.func.attr
+                    if isinstance(node.func, ast.Attribute)
+                    else (node.func.id if isinstance(node.func, ast.Name) else "")
+                )
+                keywords = {
+                    keyword.arg: keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg is not None
+                }
+                if called == "CheckConstraint":
+                    name = keywords.get("name")
+                    predicate = node.args[0] if node.args else None
+                elif called == "create_check_constraint":
+                    # op.create_check_constraint(name, table, predicate)
+                    name = node.args[0] if node.args else None
+                    predicate = node.args[2] if len(node.args) > 2 else None
+                else:
+                    continue
+                if isinstance(name, ast.Constant) and isinstance(predicate, ast.Constant):
+                    found[str(name.value)] = str(predicate.value)
+    return found
+
+
+def test_migrations_constrain_the_same_vocabulary_as_the_tables() -> None:
+    """The check constraints in the migrations must match the Python enums.
+
+    ``tables.py`` generates its constraints from the enums, so it cannot
+    drift. The migrations are frozen SQL, so they can: adding an enum member
+    without a migration leaves a live database rejecting a value the code
+    considers valid, and nothing fails until something tries to store one.
+
+    Read statically, so this needs no database.
+    """
+    declared = _declared_check_constraints()
+    assert declared, "no check constraints found in the migrations"
+
+    for table, column, enum_cls in _ENUM_COLUMNS:
+        name = f"ck_{table}_{column}"
+        predicate = declared.get(name)
+        assert predicate, f"no migration creates {name}; declared: {sorted(declared)}"
+        allowed = set(re.findall(r"'([^']+)'", predicate))
+        expected = {member.value for member in enum_cls}
+        assert allowed == expected, (
+            f"{name} allows {sorted(allowed)} but {enum_cls.__name__} is "
+            f"{sorted(expected)}; add a migration"
+        )
 
 
 def test_a_snapshot_is_identified_by_its_content() -> None:
