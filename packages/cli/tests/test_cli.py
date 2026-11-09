@@ -535,3 +535,86 @@ def test_advisory_commands_need_a_snapshot(monkeypatch: pytest.MonkeyPatch) -> N
     result = runner.invoke(app, ["advisory", "coverage"])
     assert result.exit_code == int(ExitCode.ANALYSIS_ERROR)
     assert "no snapshot given" in result.stderr
+
+
+# --- vex -------------------------------------------------------------------
+
+
+def test_vex_export_writes_an_openvex_document(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    environment = _synthetic_environment(fixture_repos_dir, tmp_path, "unused-transitive")
+    out = tmp_path / "doc.vex.json"
+    result = runner.invoke(
+        app,
+        [
+            "vex",
+            "export",
+            str(fixture_repos_dir / "unused-transitive"),
+            "--author",
+            "Example Org",
+            "--product",
+            "pkg:generic/my-service@1.0.0",
+            "--environment",
+            str(environment),
+            "-o",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0
+    document = json.loads(out.read_text(encoding="utf-8"))
+
+    assert document["@context"] == "https://openvex.dev/ns/v0.2.0"
+    assert document["author"] == "Example Org"
+    cleared = [s for s in document["statements"] if s["status"] == "not_affected"]
+    assert cleared, "the unused dependency should be stated as not affected"
+    # The product is what you ship; the dependency is a subcomponent.
+    assert cleared[0]["products"][0]["@id"] == "pkg:generic/my-service@1.0.0"
+    assert cleared[0]["products"][0]["subcomponents"][0]["@id"].startswith("pkg:pypi/")
+    assert cleared[0]["justification"] == "vulnerable_code_not_in_execute_path"
+    # The digest and statement counts go to stderr, so stdout stays pipeable.
+    assert "sha256" in result.stderr
+
+
+def test_vex_export_refuses_to_publish_anonymously(env: None, fixture_repos_dir: Path) -> None:
+    result = runner.invoke(app, ["vex", "export", str(fixture_repos_dir / "direct-call")])
+    assert result.exit_code == int(ExitCode.ANALYSIS_ERROR)
+    assert "--author is required" in result.stderr
+
+
+def test_vex_export_can_reuse_an_earlier_scan(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    """Re-deriving verdicts could produce a document that disagrees with the
+    report it came from."""
+    scanned = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"],
+    )
+    results = tmp_path / "results.json"
+    results.write_text(scanned.stdout, encoding="utf-8")
+
+    result = runner.invoke(app, ["vex", "export", "--author", "A", "--results", str(results)])
+    assert result.exit_code == 0
+    document = json.loads(result.stdout)
+    assert [s["vulnerability"]["name"] for s in document["statements"]] == ["CVE-2024-35195"]
+    # The scan ran without reachability, so matching's own verdict stands and
+    # the document says what to do rather than claiming anything was cleared.
+    assert document["statements"][0]["status"] == "affected"
+    assert "Upgrade requests to 2.32.0" in document["statements"][0]["action_statement"]
+
+
+def test_vex_export_is_byte_identical_across_runs(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    """What lets a document be diffed and makes its hash worth attesting."""
+    scanned = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"],
+    )
+    results = tmp_path / "results.json"
+    results.write_text(scanned.stdout, encoding="utf-8")
+
+    first = runner.invoke(app, ["vex", "export", "--author", "A", "--results", str(results)])
+    second = runner.invoke(app, ["vex", "export", "--author", "A", "--results", str(results)])
+    assert first.stdout == second.stdout

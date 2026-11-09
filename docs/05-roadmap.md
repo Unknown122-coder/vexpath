@@ -463,9 +463,51 @@ Acceptance:
 - Extracted-symbol coverage at or above 55 % of analysable PyPI advisories, which the 88.7 % fix-commit ceiling makes achievable; if below, the curated path is prioritised before M3.
 - 500-dependency scan with warm cache under 5 minutes on a 2-vCPU machine.
 
-## M3 · VEX, attestation, policy
+## M3 · VEX, attestation, policy — **in progress**
 
-Deliverables:
+### Done: OpenVEX generation
+
+`vexpath vex export` writes an OpenVEX 0.2.0 document from a scan's
+conclusions. Three modelling decisions shape it.
+
+**A statement is about your product, not about the dependency.** The subject of
+"not affected" is the thing you ship, and the vulnerable dependency is a
+subcomponent of it. A statement whose product is `pkg:pypi/urllib3@1.26.17`
+says urllib3 is not affected by its own advisory, which is false and not the
+scanner's to say. This is the part most tools get wrong, and it has its own
+test.
+
+**Only one justification is ours to assert.** Reachability establishes that the
+vulnerable code is not in the execute path. It does not establish that the
+component is absent, that the vulnerable code was removed, that an adversary
+cannot reach it, or that a mitigation is in place; those are four different
+claims needing four different kinds of evidence. Generating any of them raises
+an error rather than publishing a claim nobody tested. The exception is a human
+suppression, where a person has asserted the mitigation and stands behind it.
+
+**Every statement carries its evidence.** The specification would accept a bare
+justification. A consumer deciding whether to trust someone else's "not
+affected" needs the symbols searched for, the number of entry points and how
+they were identified, the graph's size and unresolved-call ratio, the
+confidence, and the advisory snapshot. An unexplained clearance is one nobody
+can check, so all of it goes into the impact statement.
+
+The document is byte-identical for identical results, and its identifier is
+derived from its content, so two scans of an unchanged project produce the same
+document. That is what lets a VEX document be diffed and what makes its hash
+worth attesting.
+
+Verified on the flask benchmark checkout: 38 statements, 28 not affected and 10
+under investigation, each clearance naming the symbols it searched for and the
+28 entry points it searched from.
+
+Writing it exposed one readability bug. An unreachable explanation inlined
+every searched symbol, so a fix touching twenty-five definitions produced a
+sentence nobody would read, printed twice in the VEX impact statement. It now
+names three and counts the rest; the full list travels in `searched_symbols`,
+where it is available without being in the way.
+
+### Remaining deliverables:
 - `core.vex`: OpenVEX 0.2.0 and CycloneDX VEX generation with impact and action statements generated from evidence; `vexpath vex export`.
 - `core.attest`: in-toto Statement v1, DSSE, Sigstore keyless signing (`sigstore-python`), Rekor inclusion proof, verification with identity/issuer constraints; `vexpath attest sign|verify`.
 - `core.policy`: CEL evaluation with the context from `04-api-and-cli.md § 1`; presets; `vexpath policy test`.

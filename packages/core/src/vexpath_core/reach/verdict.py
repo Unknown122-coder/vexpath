@@ -411,12 +411,25 @@ def _reached_explanation(
     )
 
 
+#: Symbols named in a one-sentence explanation before it stops listing and
+#: starts counting. A fix can touch eighty definitions, and a sentence holding
+#: all of them is one nobody reads. The full list travels in
+#: ``searched_symbols``, where a reader can see it without it being in the way.
+MAX_NAMED_SYMBOLS = 3
+
+
 def _unreachable_explanation(
     finding: Finding, symbols: Sequence[VulnerableSymbol], context: ReachabilityContext
 ) -> str:
-    names = ", ".join(dict.fromkeys(symbol.symbol for symbol in symbols))
+    unique = list(dict.fromkeys(symbol.symbol for symbol in symbols))
+    named = ", ".join(unique[:MAX_NAMED_SYMBOLS])
+    subject = (
+        f"{named} and {len(unique) - MAX_NAMED_SYMBOLS} other symbol(s) are"
+        if len(unique) > MAX_NAMED_SYMBOLS
+        else f"{named} {'are' if len(unique) > 1 else 'is'}"
+    )
     return (
-        f"{names} is not reachable from the {context.entry_points.count} entry "
+        f"{subject} not reachable from the {context.entry_points.count} entry "
         f"point(s) of this project. {finding.component.name} "
         f"{finding.component.version} is present and was traversed, but no call "
         f"path leads to the code the fix changed."
@@ -475,6 +488,7 @@ def mentioned_symbols(graph: CallGraph) -> frozenset[str]:
 
 
 __all__ = [
+    "MAX_NAMED_SYMBOLS",
     "MAX_PARSE_ERROR_RATIO",
     "ReachabilityContext",
     "apply",
