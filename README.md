@@ -4,7 +4,15 @@ An open platform that turns a Software Bill of Materials (SBOM) into an honest a
 
 It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches every component against public advisory databases, then performs **reachability analysis**: it builds a call graph of the user's code and its dependencies, extracts the exact functions that each advisory's fix commit touched, and checks whether those functions are reachable from the application's entry points. The result is published as a signed **OpenVEX** document and an **in-toto attestation**, enforced in CI by a **policy engine**, and surfaced on a hosted web platform with public report pages, per-package vulnerability pages and a README badge.
 
-> Status: **M1 complete** (2026-11-09). The scanner works end to end: it reads seven lockfile formats and both SBOM standards, matches against a reproducible advisory corpus, and reports in table, JSON, Markdown and SARIF. Reachability analysis, the part that makes this different from every other scanner, is M2. See [docs/05-roadmap.md](docs/05-roadmap.md).
+> Status: **M1 complete, M2 in progress** (2026-11-09). The scanner reads
+> seven lockfile formats and both SBOM standards, matches against a
+> reproducible advisory corpus, and reports in table, JSON, Markdown and
+> SARIF. The reachability engine now works end to end against the fixture
+> suite: it builds call graphs, links them, searches for the vulnerable
+> symbols and produces a verdict with the call path as evidence. What it
+> still needs is the worker that extracts those symbols from real fix
+> commits, and the cache of dependency graphs. See
+> [docs/05-roadmap.md](docs/05-roadmap.md).
 
 ## Quick start
 
@@ -24,10 +32,11 @@ make up                            # Postgres, migrations, API and seeded adviso
 curl localhost:8000/healthz
 ```
 
-What a scan says today, and what it does not: findings are reported as
-**affected** or **under investigation**, never cleared. Nothing is marked not
-affected until reachability analysis exists to prove it, and the tool says so on
-every run rather than letting the absence pass unnoticed.
+What a scan says today, and what it does not: `vexpath scan` reports findings
+as **affected** or **under investigation**, never cleared, because the
+reachability engine is not yet wired into the command. The engine itself
+decides all five outcomes and is exercised by the benchmark in
+`packages/core/tests/test_reach_fixtures.py`.
 
 `make help` lists every target. No Node, npm or bundler is involved anywhere (ADR-0011).
 
@@ -74,3 +83,13 @@ every run rather than letting the absence pass unnoticed.
 The name is settled and recorded in [ADR-0013](docs/adr/0013-the-name-vexpath.md):
 **VEX** is the signed exploitability document this tool emits, and **path** is
 the call path that is the evidence behind every verdict.
+
+## Licence
+
+Apache License 2.0. See [LICENSE](LICENSE).
+
+Apache 2.0 rather than MIT for the patent grant in section 3. A tool that
+analyses other people's dependencies and publishes signed claims about them
+will be adopted by companies whose legal review asks about patents, and the
+explicit grant removes that question. Per-file licence headers are not used;
+the LICENSE file governs the whole repository.

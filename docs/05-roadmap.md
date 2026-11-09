@@ -51,7 +51,60 @@ Deviations from the original plan, and why:
 - **The first real symbol-coverage number is not in yet.** `vexpath advisory coverage` and the scheduled workflow measure it, but running a full OSV download has not happened here. That measurement is the first task of M2, and it gates the call-graph work.
 - **EPSS and CISA KEV enrichment is deferred to M2.** The fields, the storage and the reporting exist; only the two daily feeds are not wired up. They change prioritisation, not whether a finding is reported.
 
-## M2 · Reachability for Python (the differentiator)
+## M2 · Reachability for Python (the differentiator) — **in progress**
+
+### Done: the engine
+
+The analysis itself works end to end, offline, against the fixture suite.
+
+- `core.reach.graph`: call-graph structures, two-level linking as a dictionary
+  union, and a search that answers "certainly reachable" and "possibly
+  reachable" as two separate breadth-first passes. Collapsing those two would
+  either overstate certainty or bury real findings, so they never share a code
+  path.
+- `core.reach.pybuild`: the Python builder. Resolves direct calls, imports,
+  methods on an inferred class (from an assignment, a parameter annotation, or
+  `self.attr = Foo()`), methods on `self`, inherited methods, subclass
+  overrides, and re-exports through a package's `__init__`. Marks functions
+  opaque when they use `eval`, `exec`, a dynamic import, or `getattr` on a
+  computed name. Counts every unresolved call site so the quality travels with
+  the verdict.
+- `core.reach.entrypoints`: configuration, console scripts, main guards, and
+  framework conventions (web routes, Celery tasks, Click and Typer commands,
+  Django management commands and URL configurations, serverless handlers,
+  application objects), with the public-function fallback reported as inferred.
+- `core.reach.verdict`: the verdict rules, including every refusal.
+
+Two design decisions emerged from building it, both now enforced in code:
+
+- **Importing a module does not reach the functions it defines.** Treating
+  definition as execution would make every function of every installed package
+  reachable, and nothing could ever be cleared. Imports reach module-level
+  code, class bodies and decorators, which do run; function bodies are reached
+  only by a call.
+- **A dependency whose own graph is unavailable can never be cleared.** A
+  direct call to a vulnerable symbol is still visible, so "reachable" stays
+  sound, but an absence of paths through code the analysis could not see proves
+  nothing. That case reports `package_not_analysed`, not `unreachable`.
+
+All six fixtures produce their declared verdict, status and confidence, with the
+call path as evidence. The benchmark asserts separately, ahead of everything
+else, that nothing expecting `affected` is ever cleared.
+
+### Remaining
+
+- `advisory.patchdiff`: resolve each advisory's fix commit and extract the
+  symbols its diff touched. The largest remaining piece, and the one the
+  88.7 % fix-commit coverage measured above exists to serve.
+- Dependency graph building from downloaded archives, the global cache, and the
+  `callgraph.build` worker. The fixtures vendor their dependencies, so the
+  engine is exercised; real scans need the cache.
+- Wiring reachability into `core.scan` and the CLI, including `vexpath reach`.
+- EPSS and CISA KEV enrichment, carried from M1.
+- The benchmark over 30 real repositories.
+
+### Original plan, for reference
+
 
 ### The gate: measured 2026-11-09, **passed**
 

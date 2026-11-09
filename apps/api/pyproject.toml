@@ -4,6 +4,9 @@ version = "0.0.1"
 description = "FastAPI service: the /v1 JSON API and the server-rendered web UI."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["../../LICENSE"]
+authors = [{ name = "Akmal Khan" }]
 dependencies = [
     "vexpath-core",
     "vexpath-platform",

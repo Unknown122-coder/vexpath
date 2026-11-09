@@ -253,6 +253,10 @@ class ReachReason(StrEnum):
     ENTRY_POINTS_UNKNOWN = "entry_points_unknown"
     #: The symbols exist but not in the installed version of the package.
     SYMBOLS_NOT_IN_VERSION = "symbols_not_in_version"
+    #: The dependency's own call graph was unavailable, so its internals could
+    #: not be traversed. A direct call to a vulnerable symbol is still visible,
+    #: but an absence of paths proves nothing and must not be reported as one.
+    PACKAGE_NOT_ANALYSED = "package_not_analysed"
 
 
 class EdgeKind(StrEnum):

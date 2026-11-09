@@ -4,6 +4,9 @@ version = "0.0.1"
 description = "Database schema, engine helpers and migrations shared by the API and the workers."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["../../LICENSE"]
+authors = [{ name = "Akmal Khan" }]
 dependencies = [
     "vexpath-core",
     "sqlalchemy[asyncio]>=2.0.36",

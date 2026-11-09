@@ -4,6 +4,9 @@ version = "0.0.1"
 description = "Background jobs: advisory sync, patch diffing, call-graph builds, hosted scans and result ingest."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["../../LICENSE"]
+authors = [{ name = "Akmal Khan" }]
 dependencies = [
     "vexpath-core",
     "vexpath-db",
