@@ -32,6 +32,7 @@ from vexpath_core.models.advisory import Advisory, VulnerableSymbol
 from vexpath_core.models.finding import EntryPointInfo, Finding, GraphStats
 from vexpath_core.models.results import ArtifactPaths, ProjectRef, SbomRef, ScanResults
 from vexpath_core.models.sbom import Sbom
+from vexpath_core.policy import evaluate as evaluate_policy
 from vexpath_core.protocols import AdvisorySource, Clock, SystemClock
 from vexpath_core.reach import (
     ReachabilityContext,
@@ -100,6 +101,10 @@ class ScanOptions:
     #: installed. Reaches the network, so it is opt-in; without it a scan of a
     #: lockfile alone can confirm findings but never clear them.
     download_missing: bool = False
+    #: The gate. A preset name or a CEL expression; None evaluates nothing, so
+    #: a scan that was only asked to report does not quietly acquire an
+    #: opinion about whether the build should pass.
+    policy: str | None = None
 
 
 def scan(
@@ -137,7 +142,7 @@ def scan(
     else:
         analysis_notes.append("Reachability analysis was not run, so no finding was cleared.")
 
-    return ScanResults(
+    results = ScanResults(
         schema_version=RESULTS_SCHEMA,
         core_version=core_version,
         generated_at=resolved_clock.now(),
@@ -160,6 +165,13 @@ def scan(
         unsupported_reachability_ecosystems=tuple(dict.fromkeys(unsupported)),
         analysis_notes=tuple(dict.fromkeys(analysis_notes)),
     )
+
+    if resolved_options.policy is None:
+        return results
+    # Evaluated last, over the finished results, so a policy sees exactly what
+    # a reader of the report sees. Errors are not caught here: a gate that
+    # cannot be evaluated must not be reported as one that passed.
+    return results.model_copy(update={"policy": evaluate_policy(results, resolved_options.policy)})
 
 
 @dataclass(frozen=True, slots=True)

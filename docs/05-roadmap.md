@@ -507,6 +507,55 @@ sentence nobody would read, printed twice in the VEX impact statement. It now
 names three and counts the rest; the full list travels in `searched_symbols`,
 where it is available without being in the way.
 
+### Done: the policy engine
+
+A scanner that reports is useful; a scanner that gates is what keeps a
+vulnerable dependency out of production. `vexpath scan --policy` is that gate,
+and `vexpath policy list|explain|test` is how it is written and tried out
+before anyone pushes.
+
+CEL rather than a bespoke matcher, because a policy is a thing teams write,
+review in a pull request and copy between projects, and a syntax invented for
+one tool has to be learned for one tool.
+
+**An expression evaluates to true when the build must fail.** That way round
+deliberately: a policy describes what is unacceptable, so a mistake tends
+toward a failing build rather than a silently green one. An expression that
+returns a non-boolean is a configuration error, not a truthiness test. An empty
+policy is refused, because choosing not to gate should be visible, and the
+`report-only` preset exists to say so.
+
+**A policy reads only what the scan concluded.** The context is a projection of
+the results: no clock, no environment, no filesystem. The same results and the
+same policy give the same answer on a laptop and in CI, which is what makes a
+local run worth trusting. Every field is present and none is null, so an
+expression comparing against a missing value cannot break a build.
+
+**`reach.analysed` is the field that matters most.** Without it a gate cannot
+tell "not reachable" from "nobody looked", and treating the second as the first
+is how a reachability-aware gate becomes less safe than a naive one.
+
+The five presets, and what each is for:
+
+| Preset | Fails on |
+|---|---|
+| `strict` | Any critical or high reported as affected, reachability ignored |
+| `balanced` (default) | Critical and high whose code was *proven* reachable, plus anything in the CISA catalogue |
+| `kev-only` | Only advisories known to be exploited, not cleared |
+| `nothing-outstanding` | Anything still needing a human |
+| `report-only` | Nothing, said out loud |
+
+`balanced` is the product's thesis as a gate, and it has one deliberate
+asymmetry: a KEV advisory whose vulnerable code was proven unreachable still
+passes. The catalogue says the vulnerability is exploited somewhere, not that
+this project executes the code.
+
+Verified against the flask benchmark checkout: `balanced` passes its 38
+findings, because none was proven reachable and none is in the catalogue;
+`nothing-outstanding` fails and names each of the ten still open. Exit codes
+hold the documented contract: 0 pass, 1 policy failed, 3 for a malformed or
+non-boolean policy, with the parse error pointing at the position.
+
 ### Remaining deliverables:
 - `core.vex`: OpenVEX 0.2.0 and CycloneDX VEX generation with impact and action statements generated from evidence; `vexpath vex export`.
 - `core.attest`: in-toto Statement v1, DSSE, Sigstore keyless signing (`sigstore-python`), Rekor inclusion proof, verification with identity/issuer constraints; `vexpath attest sign|verify`.

@@ -18,6 +18,10 @@ dependencies = [
     "structlog>=24.4",
     "cyclonedx-python-lib>=8.0",
     "jsonschema>=4.23",
+    # CEL for policy evaluation. A real expression language rather than a
+    # bespoke matcher, because a policy is a thing people write and share and
+    # a home-grown syntax would have to be learned for one tool only.
+    "cel-python>=0.1.5",
 ]
 
 [project.optional-dependencies]

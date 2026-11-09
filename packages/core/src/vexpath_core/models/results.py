@@ -33,11 +33,20 @@ class SbomRef(Base):
 
 
 class PolicyViolation(Base):
-    """One reason a policy failed."""
+    """One reason a policy failed.
+
+    Names the rule and what it fired on. A gate that reports only "failed" is
+    one a developer has to reverse-engineer at the moment they are least
+    inclined to.
+    """
 
     message: str
+    #: The policy that fired. A configuration can hold several.
+    rule: str = ""
     finding_id: str | None = None
     advisory_id: str | None = None
+    #: Purl of the component the finding is against.
+    component: str | None = None
 
 
 class PolicyResult(Base):

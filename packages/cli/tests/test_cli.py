@@ -618,3 +618,141 @@ def test_vex_export_is_byte_identical_across_runs(
     first = runner.invoke(app, ["vex", "export", "--author", "A", "--results", str(results)])
     second = runner.invoke(app, ["vex", "export", "--author", "A", "--results", str(results)])
     assert first.stdout == second.stdout
+
+
+# --- policy ----------------------------------------------------------------
+
+
+def test_policy_list_describes_every_preset() -> None:
+    result = runner.invoke(app, ["policy", "list"])
+    assert result.exit_code == 0
+    for name in ("strict", "balanced", "kev-only", "report-only"):
+        assert name in result.stdout
+    assert "(default)" in result.stdout
+    # The convention that makes every mistake safe rather than silent.
+    assert "true when the build must fail" in result.stdout
+
+
+def test_policy_explain_lists_what_an_expression_can_read() -> None:
+    result = runner.invoke(app, ["policy", "explain", "balanced"])
+    assert result.exit_code == 0
+    assert "findings[]" in result.stdout
+    assert "reach{analysed" in result.stdout
+    assert "compiled successfully" in result.stderr
+
+
+def test_policy_explain_refuses_a_malformed_expression() -> None:
+    result = runner.invoke(app, ["policy", "explain", "findings.exists(f, f.verdict ==="])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "not valid CEL" in result.stderr
+
+
+def _scan_results(env: None, fixture_repos_dir: Path, tmp_path: Path) -> Path:
+    scanned = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"],
+    )
+    path = tmp_path / "results.json"
+    path.write_text(scanned.stdout, encoding="utf-8")
+    return path
+
+
+def test_policy_test_evaluates_against_an_earlier_scan(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    results = _scan_results(env, fixture_repos_dir, tmp_path)
+
+    # The fixture's advisory is MEDIUM and was never proven reachable, so
+    # balanced passes. Gating on anything outstanding at all does not.
+    balanced = runner.invoke(app, ["policy", "test", "balanced", "--scan", str(results)])
+    assert balanced.exit_code == 0
+    assert "PASS" in balanced.stdout
+
+    outstanding = runner.invoke(
+        app, ["policy", "test", "nothing-outstanding", "--scan", str(results)]
+    )
+    assert outstanding.exit_code == int(ExitCode.POLICY_FAILED)
+    assert "FAIL" in outstanding.stdout
+    assert "CVE-2024-35195" in outstanding.stdout
+
+
+def test_policy_test_reports_json_for_a_pipeline(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    results = _scan_results(env, fixture_repos_dir, tmp_path)
+    result = runner.invoke(
+        app, ["policy", "test", "nothing-outstanding", "--scan", str(results), "--format", "json"]
+    )
+    payload = json.loads(result.stdout)
+    assert payload["name"] == "nothing-outstanding"
+    assert payload["passed"] is False
+    assert payload["violations"][0]["advisory_id"] == "CVE-2024-35195"
+    assert payload["violations"][0]["rule"] == "nothing-outstanding"
+
+
+def test_policy_test_accepts_an_expression_from_a_file(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    results = _scan_results(env, fixture_repos_dir, tmp_path)
+    policy_file = tmp_path / "gate.cel"
+    policy_file.write_text('findings.exists(f, f.component == "requests")\n', encoding="utf-8")
+
+    result = runner.invoke(app, ["policy", "test", str(policy_file), "--scan", str(results)])
+    assert result.exit_code == int(ExitCode.POLICY_FAILED)
+
+
+def test_a_broken_policy_is_a_configuration_error_not_a_pass(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    """The worst outcome would be a gate that silently stopped working."""
+    results = _scan_results(env, fixture_repos_dir, tmp_path)
+    result = runner.invoke(app, ["policy", "test", "size(findings)", "--scan", str(results)])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "rather than a boolean" in result.stderr
+
+
+def test_scan_gates_on_a_policy(env: None, fixture_repos_dir: Path) -> None:
+    passing = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach", "--policy", "balanced"],
+    )
+    assert passing.exit_code == 0
+    assert "Policy balanced: passed" in passing.stdout
+
+    failing = runner.invoke(
+        app,
+        [
+            "scan",
+            str(fixture_repos_dir / "direct-call"),
+            "--no-reach",
+            "--policy",
+            "nothing-outstanding",
+        ],
+    )
+    assert failing.exit_code == int(ExitCode.POLICY_FAILED)
+    assert "nothing-outstanding" in failing.stdout
+
+
+def test_a_scan_without_a_policy_gates_on_nothing(env: None, fixture_repos_dir: Path) -> None:
+    """A scan asked only to report must not acquire an opinion."""
+    result = runner.invoke(
+        app, ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach", "--format", "json"]
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["policy"] is None
+
+
+def test_a_scan_with_a_broken_policy_exits_with_a_config_error(
+    env: None, fixture_repos_dir: Path
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(fixture_repos_dir / "direct-call"),
+            "--no-reach",
+            "--policy",
+            "findings.exists(f, f.verdict ===",
+        ],
+    )
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)

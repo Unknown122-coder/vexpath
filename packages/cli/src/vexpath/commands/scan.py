@@ -8,11 +8,12 @@ from typing import Annotated
 import typer
 
 from vexpath.exit_codes import ExitCode
-from vexpath.output import OutputFormat, emit, emit_json, fail, note
+from vexpath.output import OutputFormat, emit, emit_json, fail, fail_config, note
 from vexpath.sources import SNAPSHOT_ENV, advisory_source, close_source
 from vexpath_core import report
 from vexpath_core.advisory.source import AdvisorySourceError
 from vexpath_core.enums import ComponentScope
+from vexpath_core.policy import PRESETS, PolicyError
 from vexpath_core.sbom import LockfileError, UnknownSbomFormatError
 from vexpath_core.sbom.cyclonedx import CycloneDxError
 from vexpath_core.sbom.spdx import SpdxError
@@ -117,13 +118,26 @@ def command(
             "--no-cache", help="Rebuild dependency graphs instead of reusing cached ones."
         ),
     ] = False,
+    policy: Annotated[
+        str | None,
+        typer.Option(
+            "--policy",
+            help=(
+                "The gate: a preset name, a CEL expression, or a path to a file "
+                "holding one. Exits 1 when it fails. Run 'vexpath policy list' to "
+                "see the presets. Without this, nothing is gated and the scan "
+                "only reports."
+            ),
+        ),
+    ] = None,
     fail_on_findings: Annotated[
         bool,
         typer.Option(
             "--fail-on-findings/--no-fail-on-findings",
             help=(
-                "Exit with code 1 when anything needs attention. Until policy "
-                "evaluation lands, this is the gate for CI."
+                "Exit with code 1 when anything needs attention at all. A blunt "
+                "alternative to --policy, kept because it needs no expression "
+                "written and sometimes that is the right trade."
             ),
         ),
     ] = False,
@@ -151,6 +165,7 @@ def command(
         sbom_path=sbom,
         lockfile=lockfile,
         include_scopes=scopes,
+        policy=_resolve_policy(policy),
         reachability=not no_reach,
         entry_points=tuple(
             entry.strip() for entry in (entry_point or "").split(",") if entry.strip()
@@ -162,6 +177,10 @@ def command(
 
     try:
         results = run_scan(path, source, options=options)
+    except PolicyError as exc:
+        # A gate that cannot be evaluated is a configuration problem, and must
+        # never be reported as a gate that passed.
+        fail_config(str(exc))
     except (LockfileError, UnknownSbomFormatError, CycloneDxError, SpdxError) as exc:
         fail(str(exc))
     except AdvisorySourceError as exc:
@@ -174,9 +193,32 @@ def command(
 
     _render(results, output_format, path, options, show_cleared=show_cleared)
 
+    if results.policy is not None and not results.policy.passed:
+        raise typer.Exit(code=int(ExitCode.POLICY_FAILED))
+
     needs_attention = len(results.findings_needing_attention())
     if fail_on_findings and needs_attention:
         raise typer.Exit(code=int(ExitCode.POLICY_FAILED))
+
+
+def _resolve_policy(source: str | None) -> str | None:
+    """Turn the flag into something the core can compile.
+
+    A preset name wins over a file of the same name: the presets are a closed
+    vocabulary, and a file called ``balanced`` in a working directory must not
+    silently change what the default means.
+    """
+    if source is None:
+        return None
+    if source in PRESETS:
+        return source
+    candidate = Path(source)
+    if candidate.is_file():
+        try:
+            return candidate.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            fail_config(f"{candidate} could not be read: {exc}")
+    return source
 
 
 def _render(
