@@ -272,11 +272,39 @@ Both failures point the same way, and it is the direction this project refuses:
 they turn weak evidence into a confident answer. Neither would have surfaced
 against a fixture.
 
+### Done: exploitation signals
+
+EPSS probabilities and the CISA Known Exploited Vulnerabilities catalogue,
+carried over from M1. They change what to fix first and never what is reported,
+which is the asymmetry most of their tests assert.
+
+A sync attaches them to the corpus it writes.
+`vexpath-worker enrich-advisories` refreshes them in place over a stored
+corpus, because EPSS is recomputed daily and the advisory corpus is not:
+re-downloading the OSV exports to pick up new probabilities would be the wrong
+trade. Only the four signal columns are written.
+
+Both feeds are keyed by CVE, so lookups go through every identifier an advisory
+carries. Most of OSV is GHSA-primary with the CVE as an alias, and matching
+only the primary identifier would have lost most of the corpus silently.
+
+A feed being unreachable is reported, never fatal. Failing a sync because a
+third party is down would stop a security tool from updating.
+
+Measured against the live feeds on 2026-11-09: 402,199 EPSS scores and 1,772
+KEV entries downloaded; of 19,552 stored advisories, 6,714 of the 6,766
+carrying a CVE identifier were scored, which is 99.2 %, and 21 are known
+exploited.
+
+That number first read 34.3 %, because the denominator was the whole corpus and
+12,786 of its records are malicious-package entries with no CVE that no feed
+can ever score. The same wrong-divisor mistake as the fix-commit gate in M1,
+and it would again have made a working system look broken.
+
 ### Remaining
 
 - Dependency graphs from downloaded archives, for packages a scan's environment
   does not have installed.
-- EPSS and CISA KEV enrichment, carried from M1.
 - The benchmark over 30 real repositories.
 - Scheduling extraction in the reference deployment, which waits for M4: the
   sync workflow publishes a snapshot and has no database to extract into.

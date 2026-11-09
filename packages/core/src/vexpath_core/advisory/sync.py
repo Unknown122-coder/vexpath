@@ -22,6 +22,12 @@ from pathlib import Path
 
 import httpx
 
+from vexpath_core.advisory.enrich import (
+    EnrichmentCounts,
+    ExploitSignals,
+    enrich_all,
+    fetch_signals,
+)
 from vexpath_core.advisory.osv import normalise_all
 from vexpath_core.enums import canonical_ecosystem
 from vexpath_core.ids import new_ulid
@@ -59,6 +65,13 @@ class SyncReport:
     #: Records that could not be normalised, with the reason for each. Never
     #: fatal: one malformed record must not abandon a corpus of thousands.
     skipped: tuple[str, ...]
+    #: How much of the corpus carries an exploitation signal. None when
+    #: enrichment was not asked for.
+    enrichment: EnrichmentCounts | None = None
+    #: Enrichment feeds that could not be read. Never fatal: a corpus without
+    #: EPSS is still correct, and failing a sync because a third party is down
+    #: would stop a security tool from updating.
+    enrichment_failures: tuple[str, ...] = ()
 
     @property
     def symbol_coverage(self) -> dict[str, float]:
@@ -77,8 +90,13 @@ class SyncReport:
         parts = [f"{self.advisories} advisories"]
         for ecosystem, share in sorted(self.symbol_coverage.items()):
             parts.append(f"{ecosystem} symbol coverage {share:.1%}")
+        if self.enrichment is not None:
+            parts.append(f"EPSS on {self.enrichment.epss_coverage:.1%}")
+            parts.append(f"{self.enrichment.with_kev} known exploited")
         if self.skipped:
             parts.append(f"{len(self.skipped)} skipped")
+        if self.enrichment_failures:
+            parts.append(f"{len(self.enrichment_failures)} feed(s) unavailable")
         return ", ".join(parts)
 
 
@@ -88,6 +106,8 @@ def sync(
     ecosystems: Sequence[str] = DEFAULT_ECOSYSTEMS,
     client: httpx.Client | None = None,
     snapshot_id: str | None = None,
+    enrich: bool = True,
+    signals: ExploitSignals | None = None,
 ) -> SyncReport:
     """Download the given ecosystems and write a snapshot to ``directory``.
 
@@ -96,6 +116,11 @@ def sync(
         ecosystems: OSV ecosystem names to fetch.
         client: Injected HTTP client, so this is testable without network.
         snapshot_id: Identifier for the snapshot. Generated if omitted.
+        enrich: Attach EPSS probabilities and CISA KEV membership. These
+            change what to fix first, never what is reported, so a feed being
+            unavailable is recorded and the corpus is written without it.
+        signals: Pre-fetched exploitation signals, instead of downloading
+            them. Injected so tests run offline.
 
     Raises:
         AdvisorySyncError: if an export cannot be downloaded or read.
@@ -116,7 +141,18 @@ def sync(
         if owns_client:
             http.close()
 
-    deduplicated = _deduplicate(advisories)
+    # A sequence, because enrichment replaces the list with a tuple of
+    # updated records and everything downstream only iterates.
+    deduplicated: Sequence[Advisory] = _deduplicate(advisories)
+
+    counts: EnrichmentCounts | None = None
+    failures: tuple[str, ...] = ()
+    if enrich or signals is not None:
+        resolved = signals if signals is not None else fetch_signals(client=client)
+        failures = resolved.failures
+        if not resolved.is_empty:
+            deduplicated, counts = enrich_all(deduplicated, resolved)
+
     snapshot = AdvisorySnapshot(
         id=snapshot_id or new_ulid(),
         created_at=datetime.now(UTC),
@@ -126,7 +162,13 @@ def sync(
         counts=summarise(deduplicated),
     )
     stored = write_snapshot(directory, snapshot, deduplicated)
-    return SyncReport(snapshot=stored, advisories=len(deduplicated), skipped=tuple(skipped))
+    return SyncReport(
+        snapshot=stored,
+        advisories=len(deduplicated),
+        skipped=tuple(skipped),
+        enrichment=counts,
+        enrichment_failures=failures,
+    )
 
 
 def _download_export(client: httpx.Client, ecosystem: str) -> bytes:

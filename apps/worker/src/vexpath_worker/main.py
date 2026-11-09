@@ -21,6 +21,7 @@ from vexpath_db.engine import create_sync_engine
 from vexpath_platform.logging import configure_logging, get_logger
 from vexpath_platform.settings import get_settings
 from vexpath_worker import __version__
+from vexpath_worker.jobs.enrich_advisories import refresh_signals
 from vexpath_worker.jobs.export_snapshot import export_snapshot
 from vexpath_worker.jobs.extract_symbols import (
     DEFAULT_BATCH,
@@ -272,6 +273,43 @@ def export_snapshot_command(
     finally:
         engine.dispose()
     typer.echo(report.summary_line())
+
+
+@app.command("enrich-advisories")
+def enrich_advisories_command(
+    fail_on_missing_feed: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-missing-feed",
+            help=(
+                "Exit non-zero when a feed could not be read. Off by default: "
+                "the corpus is still correct without a prioritisation signal."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Refresh EPSS probabilities and CISA KEV membership over the corpus.
+
+    EPSS is recomputed daily; the advisory corpus is not. Re-downloading the
+    OSV exports to pick up new probabilities would be the wrong trade, so this
+    updates the two signal columns in place and nothing else.
+
+    These signals change what to fix first, never what is reported. A feed
+    being unavailable is reported rather than fatal.
+    """
+    settings = get_settings()
+    configure_logging(settings)
+    engine = create_sync_engine(settings.database_url)
+    try:
+        report = refresh_signals(engine)
+    finally:
+        engine.dispose()
+
+    typer.echo(report.summary_line())
+    for failure in report.failures:
+        typer.secho(failure, fg=typer.colors.YELLOW, err=True)
+    if fail_on_missing_feed and report.failures:
+        raise typer.Exit(code=1)
 
 
 @app.command()

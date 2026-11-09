@@ -62,6 +62,18 @@ jobs:
             uv run vexpath advisory coverage --snapshot var/advisories
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Report exploitation-signal coverage
+        # EPSS and KEV change prioritisation, not what is reported, so a feed
+        # being down is noted rather than failing the job. The snapshot above
+        # already carries whatever was available.
+        run: |
+          {
+            echo
+            echo '### Exploitation signals'
+            echo
+            echo 'Attached during the sync above; see the job log for feed availability.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the snapshot
         uses: actions/upload-artifact@v4
         with:

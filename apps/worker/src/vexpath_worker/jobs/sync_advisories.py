@@ -18,6 +18,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
+from vexpath_core.advisory.enrich import EnrichmentCounts
 from vexpath_core.advisory.sync import DEFAULT_ECOSYSTEMS, sync
 from vexpath_platform.logging import get_logger
 from vexpath_worker.jobs.seed_advisories import SeedReport, seed_snapshot
@@ -53,6 +54,10 @@ class SyncJobReport:
     #: Advisory count per ecosystem, for deciding whether a ratio means
     #: anything.
     advisory_counts: dict[str, int] = field(default_factory=dict)
+    #: How much of the corpus carries an exploitation signal, when
+    #: enrichment ran. These change prioritisation, never whether a finding
+    #: is reported.
+    enrichment: EnrichmentCounts | None = None
 
     @property
     def coverage_concerns(self) -> tuple[str, ...]:
@@ -91,6 +96,9 @@ class SyncJobReport:
 
     def summary_line(self) -> str:
         parts = [f"snapshot {self.snapshot_id}", f"{self.advisories} advisories"]
+        if self.enrichment is not None:
+            parts.append(f"EPSS on {self.enrichment.epss_coverage:.1%}")
+            parts.append(f"{self.enrichment.with_kev} known exploited")
         for ecosystem, share in sorted(self.symbol_coverage.items()):
             parts.append(f"{ecosystem} symbols {share:.1%}")
         if self.skipped:
@@ -138,6 +146,7 @@ def refresh_advisories(
         skipped=len(report.skipped),
         loaded=loaded,
         requested=tuple(ecosystems),
+        enrichment=report.enrichment,
         advisory_counts={
             name: int(counts.get("advisories", 0))
             for name, counts in report.snapshot.counts.items()

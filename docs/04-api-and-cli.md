@@ -19,6 +19,14 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 | `vexpath callgraph build PATH` / `vexpath callgraph show SYMBOL` | Build/inspect graphs; used in development and support |
 | `vexpath login` / `vexpath whoami` | Store an API key for uploads |
 
+Worker commands, which a deployment schedules: `sync-advisories` downloads a
+corpus and attaches EPSS and KEV, `extract-symbols` diffs fix commits into
+vulnerable symbols, `enrich-advisories` refreshes the two daily feeds in place,
+`export-snapshot` writes the enriched corpus back out for the command-line tool
+to read, and `seed-advisories` loads a snapshot. The order that matters is
+sync, extract, export: without the export the extracted symbols never reach the
+tool that does the reaching.
+
 Implemented today: `sbom generate|validate|lockfiles`, `scan` (through
 reachability, without policy, VEX or upload), `reach`, `advisory
 sync|show|coverage`, and `version`. The rest arrive with the milestone that
