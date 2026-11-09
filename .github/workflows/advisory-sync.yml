@@ -1,0 +1,73 @@
+name: Advisory sync
+
+# Keeps the advisory corpus current and publishes it as a snapshot artefact.
+#
+# The schedule is the cron trigger the reference deployment relies on
+# (docs/01-architecture.md section 7.1). It runs here rather than in the
+# platform because a snapshot is useful on its own: an air-gapped environment
+# copies it in, and a team that wants reproducible scans for a whole week
+# downloads one and points SSCP_ADVISORY_SNAPSHOT_DIR at it.
+
+on:
+  schedule:
+    # Four times a day, offset from the hour so it does not compete with every
+    # other project's hourly cron.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      ecosystems:
+        description: Comma-separated OSV ecosystem names
+        default: PyPI,npm
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advisory-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Download and measure the corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the workspace
+        run: uv sync --all-packages --frozen
+
+      - name: Download the corpus and write a snapshot
+        # No database here, so the snapshot is written and nothing is loaded.
+        run: >
+          uv run python -m sscp_worker.main sync-advisories var/advisories
+          --ecosystem "${{ inputs.ecosystems || 'PyPI,npm' }}"
+          --no-load
+
+      - name: Report symbol coverage
+        # This is the measurement that decides whether reachability analysis
+        # can clear enough findings to justify its engine, so it is surfaced in
+        # the job summary rather than left in a log.
+        run: |
+          {
+            echo '## Advisory corpus'
+            echo
+            uv run sscp advisory coverage --snapshot var/advisories
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: advisory-snapshot
+          path: var/advisories/
+          # Long enough that a scan from a few weeks ago can be re-derived
+          # against the exact corpus it used.
+          retention-days: 90
+          compression-level: 9

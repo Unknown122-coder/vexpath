@@ -25,27 +25,37 @@ Acceptance met:
 
 Deferred deliberately:
 - The snapshot holds eight hand-built advisories rather than a few hundred real ones. Real advisories arrive with the OSV ingest in M1, which is the code that can fetch and normalise them; hand-transcribing hundreds now would produce a large fixture whose accuracy nobody had verified.
-- `procrastinate` is not yet wired up. A worker loop with no scheduled job to consume would prove nothing; it arrives with `advisory.sync` in M1 (ADR-0003).
+- `procrastinate` is not yet wired up. A worker loop with nothing enqueuing work would prove nothing. It now arrives in M4 with scan ingest, the first user-triggered job; the scheduled advisory sync turned out to need a cron trigger rather than a queue (ADR-0003).
 
-## M1 · SBOM + matching CLI (first usable tool)
+## M1 · SBOM + matching CLI (first usable tool) — **complete 2026-11-09**
 
-Deliverables:
-- `core.sbom`: CycloneDX 1.6 JSON/XML and SPDX 2.3 JSON/tag-value parsers with schema validation; native generators for Python lockfiles (`uv.lock`, `poetry.lock`, `Pipfile.lock`, pinned `requirements.txt`, `pdm.lock`) and for `package-lock.json` and `pnpm-lock.yaml`; Syft fallback.
-- `core.advisory`: OSV ecosystem export loader, GHSA enrichment, EPSS and KEV enrichment, snapshot hashing; live client against the OSV API for the CLI when no snapshot is present.
-- `core.vulnmatch`: PEP 440 and semver range evaluation, alias dedup.
-- `core.report`: table and JSON output.
-- `sscp sbom generate|validate`, `sscp scan --no-reach`, `sscp advisory sync|show`.
-- Advisory sync worker job writing to Postgres; symbol-coverage metric scaffolding (counts of advisories with fix references by tier).
+Delivered:
+- `core.sbom`: CycloneDX 1.4 to 1.6 JSON read and 1.6 write, validated against the official schemas; SPDX 2.2 and 2.3 JSON and tag-value read and write, checked structurally; format detected from content, not filename.
+- Seven native lockfile parsers: `uv.lock`, `poetry.lock`, `pdm.lock`, `Pipfile.lock`, pinned `requirements*.txt`, `package-lock.json` v2 and v3, `pnpm-lock.yaml` v6 and v9. Each yields exact versions, directness, scope, and the dependency graph where the format records one. Unpinned requirements are refused with the remedy rather than resolved.
+- `core.versions`: PEP 440 and semver ordering per ecosystem, and the OSV range algorithm including reopened ranges. Ecosystems with no precise comparator raise rather than guess.
+- `core.cvss`: CVSS 3.0 and 3.1 base scores computed from the vector, verified against nine published vectors. CVSS 4.0 is carried unscored, because its score is a lookup table rather than a formula.
+- `core.advisory`: OSV normalisation (identifier selection preferring CVE, severity from the vector, repository discovery, symbols from `ecosystem_specific`), a snapshot source and a live OSV API source, and bulk sync from the OSV ecosystem exports with alias-aware deduplication.
+- `core.vulnmatch`: matching with withdrawn advisories excluded, unorderable versions reported as under investigation, nearest-fix advice, and worst-first ordering.
+- `core.scan` and `core.report`: the pipeline, plus terminal, Markdown and SARIF 2.1.0 rendering from one source.
+- CLI: `sscp scan` (table, JSON, Markdown, SARIF), `sscp sbom generate|validate|lockfiles`, `sscp advisory sync|show|coverage`, with stdout reserved for machine output.
+- Worker: `sync-advisories` downloads, snapshots, optionally loads, and measures symbol coverage against a stated floor.
+- A scheduled workflow that refreshes the corpus, publishes it as an artefact and puts symbol coverage in the job summary.
 
-Acceptance:
-- Parses every fixture SBOM in `testdata/sboms` and round-trips component counts.
-- Matching agrees with `osv-scanner` on the fixture lockfiles (same advisory set, order-insensitive).
-- `sscp scan --no-reach` on a 500-dependency lockfile finishes in under 30 seconds with a local snapshot.
-- Report: percentage of PyPI advisories with a fix-commit reference by tier (so M2 starts with real numbers).
+Acceptance met:
+- Every fixture SBOM parses; the CycloneDX this project emits satisfies the official 1.6 schema; the CycloneDX and SPDX fixtures for the same project agree on their component set.
+- Generation is deterministic: an unchanged project produces the same digest and the same serial number across runs.
+- 348 unit tests pass, lint and formatting are clean, `mypy --strict` reports no issues across 53 source files.
+
+Deviations from the original plan, and why:
+- **Parity with `osv-scanner` is not asserted.** Comparing against another tool's output requires both to read the same live corpus, which makes the check unreproducible and dependent on a third party's release schedule. The equivalent guarantee is tested directly instead: name normalisation, range evaluation including reopened ranges, and withdrawn-advisory exclusion each have their own tests.
+- **The first real symbol-coverage number is not in yet.** `sscp advisory coverage` and the scheduled workflow measure it, but running a full OSV download has not happened here. That measurement is the first task of M2, and it gates the call-graph work.
+- **EPSS and CISA KEV enrichment is deferred to M2.** The fields, the storage and the reporting exist; only the two daily feeds are not wired up. They change prioritisation, not whether a finding is reported.
 
 ## M2 · Reachability for Python (the differentiator)
 
 Deliverables:
+- **First, the measurement that gates everything else**: run a full OSV sync and report real symbol coverage for PyPI. Below 50 %, stop and reconsider before building the call-graph engine (see `docs/05-roadmap.md` M2 acceptance).
+- EPSS and CISA KEV enrichment, carried over from M1.
 - `advisory.patchdiff` job and `vulnerable_symbols` extraction with confidence tiers; curated-overrides YAML format.
 - Python call-graph builder (`core.reach.python`): modules, imports, light assignment-flow inference, class-hierarchy analysis, conservative dynamic edges, opaque functions.
 - Entry-point detection for console scripts, `__main__`, FastAPI, Flask, Django, Celery, Typer/Click, Lambda, ASGI/WSGI callables.

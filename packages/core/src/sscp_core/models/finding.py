@@ -148,6 +148,11 @@ class Finding(Base):
     #: Identifier of a manual suppression, when one applies. A suppression
     #: changes the policy outcome, never the analytical verdict.
     suppressed_by: str | None = None
+    #: Caveats about how this finding was produced, in plain language. Used
+    #: where matching itself was uncertain, for instance when an ecosystem's
+    #: versions cannot be ordered precisely, so a reader is never left to
+    #: assume more precision than the analysis had.
+    notes: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _check_verdict_is_supported(self) -> Finding:

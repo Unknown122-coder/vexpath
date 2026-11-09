@@ -58,6 +58,10 @@ class Sbom(Base):
     edges: tuple[DependencyEdge, ...] = ()
     #: Validation findings against the CISA minimum elements, if checked.
     minimum_element_gaps: tuple[str, ...] = Field(default=())
+    #: What this inventory could not determine, in plain language. Several
+    #: lockfile formats record no dependency relationships at all, and a reader
+    #: has to know that rather than assume an empty graph means no dependencies.
+    notes: tuple[str, ...] = ()
 
     @property
     def component_count(self) -> int:

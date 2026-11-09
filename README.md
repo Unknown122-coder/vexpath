@@ -4,16 +4,30 @@ An open platform that turns a Software Bill of Materials (SBOM) into an honest a
 
 It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches every component against public advisory databases, then performs **reachability analysis**: it builds a call graph of the user's code and its dependencies, extracts the exact functions that each advisory's fix commit touched, and checks whether those functions are reachable from the application's entry points. The result is published as a signed **OpenVEX** document and an **in-toto attestation**, enforced in CI by a **policy engine**, and surfaced on a hosted web platform with public report pages, per-package vulnerability pages and a README badge.
 
-> Status: **M0 complete** (2026-11-09). The repository, tooling, domain models, database schema, API skeleton and test fixtures are in place and green. Analysis itself starts at M1. See [docs/05-roadmap.md](docs/05-roadmap.md).
+> Status: **M1 complete** (2026-11-09). The scanner works end to end: it reads seven lockfile formats and both SBOM standards, matches against a reproducible advisory corpus, and reports in table, JSON, Markdown and SARIF. Reachability analysis, the part that makes this different from every other scanner, is M2. See [docs/05-roadmap.md](docs/05-roadmap.md).
 
 ## Quick start
 
 ```bash
-make install          # create the virtualenv and install every workspace member
-make check            # lint, type-check and run the unit tests
-make up               # Postgres, MinIO, migrations, API and seeded advisories
+make install                       # create the virtualenv and install every workspace member
+make check                         # lint, type-check and run the unit tests
+
+# Scan something, offline and reproducibly, against the committed test corpus.
+export SSCP_ADVISORY_SNAPSHOT_DIR=testdata/advisories
+uv run sscp scan testdata/repos/direct-call
+
+# Or download a current corpus first, then scan your own project.
+uv run sscp advisory sync var/advisories
+uv run sscp scan . --snapshot var/advisories
+
+make up                            # Postgres, migrations, API and seeded advisories
 curl localhost:8000/healthz
 ```
+
+What a scan says today, and what it does not: findings are reported as
+**affected** or **under investigation**, never cleared. Nothing is marked not
+affected until reachability analysis exists to prove it, and the tool says so on
+every run rather than letting the absence pass unnoticed.
 
 `make help` lists every target. No Node, npm or bundler is involved anywhere (ADR-0011).
 

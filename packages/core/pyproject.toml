@@ -7,19 +7,21 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.9",
     "packaging>=24.0",
+    "semver>=3.0",
     "packageurl-python>=0.16",
     "pyyaml>=6.0",
     "msgpack>=1.1",
     "httpx>=0.28",
     "structlog>=24.4",
+    "cyclonedx-python-lib>=8.0",
+    "jsonschema>=4.23",
 ]
 
 [project.optional-dependencies]
-# Pulled in from M1 onward; kept separate so M0 installs stay small.
-sbom = [
-    "cyclonedx-python-lib>=8.0",
+# SPDX support is read-mostly and its library is heavy, so it stays optional
+# until the SPDX writer lands.
+spdx = [
     "spdx-tools>=0.8",
-    "jsonschema>=4.23",
 ]
 
 [build-system]

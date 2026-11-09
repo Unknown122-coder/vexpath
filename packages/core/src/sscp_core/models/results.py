@@ -109,9 +109,9 @@ class ScanResults(Base):
         by_verdict = self.counts_by_verdict()
         reachable = len(self.reachable_findings())
         return (
-            f"{len(self.findings)} findings · "
-            f"{reachable} reachable · "
-            f"{by_verdict[Verdict.NOT_AFFECTED]} not affected · "
+            f"{len(self.findings)} findings | "
+            f"{reachable} reachable | "
+            f"{by_verdict[Verdict.NOT_AFFECTED]} not affected | "
             f"{by_verdict[Verdict.UNDER_INVESTIGATION]} under investigation"
         )
 

@@ -6,13 +6,13 @@ Exact versions we target. When a newer version ships, upgrading is an ADR, not a
 |---|---|---|---|
 | Package identity | Package URL (purl) | spec as of 2025, `packageurl-python` | Canonical component key; PyPI names PEP 503-normalised, npm scoped names percent-encoded |
 | SBOM | CycloneDX | 1.6 JSON and XML (read, write); read 1.4/1.5 | Primary SBOM format; `metadata.component`, `components[]`, `dependencies[]`, `vulnerabilities[]` for CDX-VEX |
-| SBOM | SPDX | 2.3 JSON and tag-value (read, write); 3.0.1 JSON-LD read-only | Secondary; map `relationships` DEPENDS_ON to our edges |
+| SBOM | SPDX | 2.2 and 2.3 JSON and tag-value (read, write) | Secondary; `DEPENDS_ON`, `CONTAINS` and `HAS_PREREQUISITE` relationships, and their inverses, become dependency edges. Identity comes from the `purl` external reference. |
 | SBOM baseline | CISA/NTIA Minimum Elements for an SBOM | 2021, with 2025 revision tracked | `sscp sbom validate` reports gaps: supplier, component name, version, unique ids, dependency relationships, author, timestamp |
 | Vulnerability data | OSV schema | 1.6.x | Source of truth for advisories and affected ranges; `ecosystem_specific` consumed where populated |
 | Vulnerability data | GitHub Security Advisories (GraphQL) | current | Review state, CVSS 4.0, PR/commit references |
 | Vulnerability data | FIRST EPSS | v3 daily CSV | Exploit probability on findings |
 | Vulnerability data | CISA KEV | JSON feed | `kev` flag |
-| Severity | CVSS | 3.1 and 4.0 | Stored as vector + score; normalised label |
+| Severity | CVSS | 3.0 and 3.1 scored; 4.0 carried | Base scores are **computed from the vector** by `core.cvss`, not read from a numeric field, because upstream data does not always keep the two consistent. CVSS 4.0 base scores come from a lookup table rather than a formula, so a 4.0 vector is carried unscored and its qualitative label is taken from the advisory. |
 | Versioning | PEP 440, semver 2.0.0 | | Range evaluation with `packaging` and `semver`/node-semver semantics for npm |
 | VEX | OpenVEX | 0.2.0 | Primary VEX output; statuses and justification labels exactly as the spec enumerates |
 | VEX | CycloneDX VEX | 1.6 | `vulnerabilities[].analysis.state` mapping: `affected` → `exploitable`, `not_affected` → `not_affected` with `justification`, `under_investigation` → `in_triage`, `fixed` → `resolved` |
@@ -27,8 +27,29 @@ Exact versions we target. When a newer version ships, upgrading is an ADR, not a
 | Identifiers | ULID | | Primary keys |
 | Repo config | `.sscp.yml` | our schema v1 | Documented in `04-api-and-cli.md` |
 
+## Validation: what is checked against a schema, and what is not
+
+**CycloneDX documents are validated against the official JSON schemas**, which
+ship inside `cyclonedx-python-lib`. A document this project accepts or emits is
+one the wider ecosystem accepts.
+
+**SPDX documents are checked structurally only**, against the fields SPDX 2.3
+requires, not against the official JSON schema. The CycloneDX schemas cost
+nothing because they already ship with a dependency; bundling a copy of the
+SPDX schema would mean maintaining a second source of truth for a
+specification this project does not own. The structural checks catch the
+mistakes that affect analysis: a missing version, a missing identifier, a
+malformed relationship. Stating the limit here is the point.
+
 ## Where we extend standards (documented extensions)
 
 1. **OpenVEX `impact_statement` structure.** The spec takes free text. We write human-readable text and additionally attach a CycloneDX-style `properties` block in the CDX-VEX output with `sscp:reach.status`, `sscp:reach.confidence`, `sscp:reach.symbols`, `sscp:reach.path` so machines can consume evidence.
 2. **Vulnerable symbols.** No standard exists. Our `vulnerable_symbols` export format is JSON Lines with `{advisory, ecosystem, package, symbol, kind, source, fix_commit, confidence}` and is published under a permissive licence so others can consume or contribute.
 3. **Results schema** `sscp.results/1` (see `04-api-and-cli.md § 4`).
+4. **Scope and directness in CycloneDX.** CycloneDX has no development scope,
+   collapsing it to `optional`, and no way to say whether a component is a
+   direct dependency. Both change what a policy decides, so they are carried
+   as the properties `sscp:scope` and `sscp:direct`, and read back in
+   preference to the standard field. Inventory limitations travel as
+   `sscp:note` properties, so a consumer holding only the document still
+   learns what it could not determine.

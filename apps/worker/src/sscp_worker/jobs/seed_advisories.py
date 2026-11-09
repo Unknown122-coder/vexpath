@@ -40,8 +40,8 @@ class SeedReport:
 
     def summary_line(self) -> str:
         return (
-            f"snapshot {self.snapshot_id} · {self.advisories} advisories · "
-            f"{self.affected_packages} affected packages · {self.symbols} vulnerable symbols"
+            f"snapshot {self.snapshot_id}: {self.advisories} advisories, "
+            f"{self.affected_packages} affected packages, {self.symbols} vulnerable symbols"
         )
 
 

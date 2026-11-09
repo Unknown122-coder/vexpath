@@ -18,6 +18,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sscp_core.cvss import base_score, severity_from_vector
 from sscp_core.enums import (
     Confidence,
     Severity,
@@ -44,6 +45,17 @@ OUTPUT_DIR = Path(__file__).resolve().parents[1] / "testdata" / "advisories"
 
 def _utc(year: int, month: int, day: int) -> datetime:
     return datetime(year, month, day, tzinfo=UTC)
+
+
+def _cvss(vector: str) -> CvssScore:
+    """Build a CVSS entry whose score is computed from its own vector.
+
+    Hardcoding a score next to a vector lets the two disagree, and a fixture
+    that misstates a severity teaches the wrong lesson to every test that
+    reads it.
+    """
+    version = vector.split("/")[0].split(":")[1]
+    return CvssScore(version=version, vector=vector, base_score=base_score(vector))
 
 
 def _pypi_range(introduced: str, fixed: str | None) -> AffectedRange:
@@ -99,12 +111,8 @@ def build_advisories() -> list[Advisory]:
                 "requests to that host continue to skip certificate verification even "
                 "when `verify=True` is passed."
             ),
-            severity=Severity.MEDIUM,
-            cvss_v3=CvssScore(
-                version="3.1",
-                vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N",
-                base_score=5.6,
-            ),
+            severity=severity_from_vector("CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N"),
+            cvss_v3=_cvss("CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N"),
             cwe_ids=("CWE-295",),
             references=(
                 Reference(type="ADVISORY", url="https://github.com/advisories/GHSA-9wx4-h78v-vm56"),
@@ -130,12 +138,8 @@ def build_advisories() -> list[Advisory]:
                 "A vulnerability in the PyYAML library allows arbitrary code execution "
                 "when untrusted YAML is processed with the FullLoader loader."
             ),
-            severity=Severity.CRITICAL,
-            cvss_v3=CvssScore(
-                version="3.1",
-                vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-                base_score=9.8,
-            ),
+            severity=severity_from_vector("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
+            cvss_v3=_cvss("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"),
             cwe_ids=("CWE-20", "CWE-502"),
             references=(
                 Reference(type="ADVISORY", url="https://github.com/advisories/GHSA-8q59-q68h-6hv4"),
@@ -164,12 +168,8 @@ def build_advisories() -> list[Advisory]:
                 "The xmlattr filter does not validate attribute keys, allowing injection "
                 "of additional attributes into rendered markup."
             ),
-            severity=Severity.MEDIUM,
-            cvss_v3=CvssScore(
-                version="3.1",
-                vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
-                base_score=6.1,
-            ),
+            severity=severity_from_vector("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
+            cvss_v3=_cvss("CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"),
             cwe_ids=("CWE-79",),
             references=(
                 Reference(type="ADVISORY", url="https://github.com/advisories/GHSA-h5c8-rqwp-cp95"),
