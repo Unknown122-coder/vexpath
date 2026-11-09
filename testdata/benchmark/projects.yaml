@@ -149,7 +149,7 @@ projects:
 
   - name: starlette
     repo: https://github.com/encode/starlette
-    ref: master
+    ref: main
     kind: library
     notes: Middleware chains assembled at runtime.
 

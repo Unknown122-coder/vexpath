@@ -175,9 +175,27 @@ def _run_project(project: dict[str, Any], arguments: argparse.Namespace) -> Proj
     payload, failure = _scan(checkout, arguments.snapshot)
     seconds = time.monotonic() - started
     if payload is None:
-        return ProjectResult(name=name, status="scan_failed", detail=failure, seconds=seconds)
+        return ProjectResult(
+            name=name, status=_failure_status(failure), detail=failure, seconds=seconds
+        )
 
     return _measure(name, payload, seconds)
+
+
+def _failure_status(failure: str) -> str:
+    """Separate a product limitation from a bug.
+
+    A repository with no pinned versions cannot be analysed for reachability
+    and the tool says so, which is correct behaviour and a fact about the
+    Python ecosystem rather than a defect. Measured on this set, it is the
+    commonest reason a real project cannot be scanned at all, and lumping it
+    in with crashes would hide that.
+    """
+    if "no supported lockfile" in failure:
+        return "no_lockfile"
+    if "unpinned requirement" in failure:
+        return "unpinned"
+    return "scan_failed"
 
 
 def _clone(repository: str, ref: str, destination: Path) -> str | None:
@@ -341,10 +359,16 @@ def _totals(results: list[ProjectResult]) -> dict[str, Any]:
     scanned = [result for result in results if result.status == "ok"]
     findings = sum(result.findings for result in scanned)
     cleared = sum(result.cleared for result in scanned)
+    by_status: dict[str, int] = {}
+    for result in results:
+        by_status[result.status] = by_status.get(result.status, 0) + 1
     return {
         "projects": len(results),
         "scanned": len(scanned),
         "failed": len(results) - len(scanned),
+        # Broken out, because "cannot be analysed without pinned versions" is
+        # a property of the ecosystem and "crashed" is a bug.
+        "by_status": dict(sorted(by_status.items())),
         "findings": findings,
         "cleared": cleared,
         "reachable": sum(result.reachable for result in scanned),
@@ -374,6 +398,9 @@ def _summarise(results: list[ProjectResult]) -> None:
     print(f"  unsound clearances    {totals['unsound_clearances']}")
     print(f"  distinct advisories   {totals['advisories']}")
     print(f"  awaiting symbols      {totals['awaiting_symbols']}")
+    for status, count in totals["by_status"].items():
+        if status != "ok":
+            print(f"  {status:<22}{count}")
 
     failures = [result for result in results if result.status != "ok"]
     if failures:

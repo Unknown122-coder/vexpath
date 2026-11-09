@@ -12,10 +12,10 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > vulnerable symbols, and clears a finding only when no path reaches them.
 > Symbols come from the advisory's fix commit, extracted by a worker that
 > crawls upstream repositories, and `vexpath reach` explains any single verdict
-> in full. Measured over 150 real PyPI advisories: 1,411 symbols from 106 of
-> them. What remains in this milestone is the benchmark over 30 real
-> repositories and enrichment from EPSS and CISA KEV. See
-> [docs/05-roadmap.md](docs/05-roadmap.md).
+> in full. **Measured on five real repositories: 68 of 146 findings cleared as
+> unreachable, none of them unsoundly. Flask alone went from 38 findings to 10
+> worth looking at.** See [docs/05-roadmap.md](docs/05-roadmap.md) for the full
+> run and what limits it.
 
 ## Quick start
 

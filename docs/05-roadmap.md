@@ -327,9 +327,75 @@ Verified against the real index: the nltk project from the demonstration above,
 scanned with an empty environment and `--download-missing`, reaches the same
 verdict with the same evidence as it did with the package installed.
 
+### The benchmark, first real run, 2026-11-09
+
+Five real repositories, scanned through the real command with no dependency
+installed: every dependency's source was downloaded from the index.
+
+| Project | Findings | Cleared | Still to look at | Packages linked |
+|---|---|---|---|---|
+| flask | 38 | 28 (74 %) | 10 | 67 |
+| click | 46 | 23 (50 %) | 23 | 66 |
+| jinja | 53 | 17 (32 %) | 36 | 63 |
+| httpx | 9 | 0 | 9 | 14 |
+| isort | 0 | 0 | 0 | 106 |
+| **Total** | **146** | **68 (46.6 %)** | **78** | |
+
+**No clearance broke a soundness precondition.** Every one was checked from
+outside the verdict layer: the dependency's own graph was linked, the advisory
+named symbols, none of them was reached, and the justification was the one VEX
+reserves for it. That check is the benchmark's only assertion, because it is
+the only thing here that can be wrong in a way that matters.
+
+Spot-checked by hand: flask pins `virtualenv 21.7.1`, which CVE-2026-113718
+affects. The fix changed `XonshActivator.quote`. Both that method and its class
+are present in the traversed graph and reached by none of flask's 28 entry
+points, across 461 first-party symbols and 127,201 edges. Flask does not
+activate xonsh shells. The clearance is correct.
+
+**What moves the number is symbol extraction, not the engine.** The same five
+projects were scanned twice, with nothing changed but the corpus:
+
+| Corpus | Advisories with symbols | Cleared |
+|---|---|---|
+| 1,453 symbols across 113 advisories | 113 | 51 of 146 (34.9 %) |
+| 7,548 symbols across 331 advisories | 331 | 68 of 146 (46.6 %) |
+
+45 of the 74 distinct advisories these projects hit still have no symbols, so
+every one of those stays under investigation no matter how good the graph is.
+That is the ceiling, and it moves as extraction runs.
+
+**The cache is what makes a second scan usable.** The cold run took 819 seconds
+for flask, 576 for jinja and 417 for click, almost all of it downloading
+dependency archives. Warm, the same scans took 12, 10 and 11 seconds.
+
+**Half of real repositories cannot be scanned at all yet, and that is the most
+useful thing this run found.** Of ten projects attempted, five did not get as
+far as a scan:
+
+- `mkdocs`, `pipx` and `sqlite-utils` commit no lockfile. Their `pyproject.toml`
+  gives ranges, and reachability needs exact versions, so the tool refuses
+  rather than guessing (ADR-0009).
+- `bandit` commits a `requirements.txt` with four unpinned entries, refused for
+  the same reason.
+- `starlette` was a wrong branch name in the manifest, since fixed.
+
+The refusals are correct behaviour and a fact about the Python ecosystem rather
+than a defect, so the benchmark records them under their own status instead of
+counting them as crashes. But a tool that cannot analyse a project with no
+lockfile is a tool half of repositories cannot use, and closing that gap is
+worth a milestone of its own: resolving a dependency specification to exact
+versions without installing anything.
+
 ### Remaining
 
-- The benchmark over 30 real repositories.
+- The remaining twenty-five repositories of the benchmark manifest, which is
+  wall-clock time rather than work: a cold run is roughly ten minutes per
+  project.
+- Reading a dependency specification without a lockfile, so the other half of
+  real repositories can be scanned.
+- The `tag_diff` symbol source, for the two advisories in five whose fix is
+  named by a release tag rather than a commit.
 - Scheduling extraction in the reference deployment, which waits for M4: the
   sync workflow publishes a snapshot and has no database to extract into.
 
