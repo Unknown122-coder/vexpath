@@ -1,0 +1,202 @@
+# Real repositories the reachability benchmark runs against.
+#
+# Chosen for three properties, because a benchmark that only measures easy
+# cases measures nothing:
+#
+# - They pin their dependencies. Reachability needs exact versions, and a
+#   range would make the result depend on when the benchmark ran.
+# - They are shaped differently: flat layouts and src layouts, libraries and
+#   applications, web frameworks and command-line tools and data pipelines.
+#   The entry-point detection and the call-graph builder fail in different ways
+#   on each.
+# - Their dependency sets overlap only partly, so the corpus of advisories
+#   exercised is wide rather than thirty projects' worth of the same five
+#   packages.
+#
+# `ref` is pinned to a commit so a result is reproducible. `expect` records
+# what a human checked by hand, and is the only part of this file that can
+# fail the benchmark: everything else is measured, not asserted.
+
+version: 1
+
+projects:
+  - name: httpie
+    repo: https://github.com/httpie/cli
+    ref: master
+    lockfile: setup.py
+    kind: cli
+    notes: Command-line HTTP client. Console-script entry points, flat layout.
+
+  - name: rich-cli
+    repo: https://github.com/Textualize/rich-cli
+    ref: main
+    kind: cli
+    notes: Click-based command line, src layout, small dependency set.
+
+  - name: flask
+    repo: https://github.com/pallets/flask
+    ref: main
+    kind: library
+    notes: Web framework. Its own routes are not the application's entry points.
+
+  - name: requests
+    repo: https://github.com/psf/requests
+    ref: main
+    kind: library
+    notes: The package most advisories in the fixture corpus concern.
+
+  - name: pydantic
+    repo: https://github.com/pydantic/pydantic
+    ref: main
+    kind: library
+    notes: Heavy metaclass and decorator use, which the builder resolves poorly.
+
+  - name: fastapi
+    repo: https://github.com/fastapi/fastapi
+    ref: master
+    kind: library
+    notes: Decorator-driven routing, the framework convention most relied on.
+
+  - name: scrapy
+    repo: https://github.com/scrapy/scrapy
+    ref: master
+    kind: application
+    notes: Plugin architecture resolved by string names, so mostly dynamic.
+
+  - name: celery
+    repo: https://github.com/celery/celery
+    ref: main
+    kind: application
+    notes: Task decorators and a worker entry point rather than a main guard.
+
+  - name: sqlalchemy
+    repo: https://github.com/sqlalchemy/sqlalchemy
+    ref: main
+    kind: library
+    notes: Large, deep inheritance, many re-exports through package __init__.
+
+  - name: black
+    repo: https://github.com/psf/black
+    ref: main
+    kind: cli
+    notes: Click command line, src layout, mypyc-compiled in release but pure here.
+
+  - name: mkdocs
+    repo: https://github.com/mkdocs/mkdocs
+    ref: master
+    kind: cli
+    notes: Plugin entry points declared in metadata rather than called.
+
+  - name: poetry
+    repo: https://github.com/python-poetry/poetry
+    ref: main
+    kind: cli
+    notes: Large command-line application with a pinned lockfile of its own.
+
+  - name: pipx
+    repo: https://github.com/pypa/pipx
+    ref: main
+    kind: cli
+    notes: Small, src layout, argparse rather than a framework.
+
+  - name: datasette
+    repo: https://github.com/simonw/datasette
+    ref: main
+    kind: application
+    notes: ASGI application object plus plugin hooks.
+
+  - name: sqlite-utils
+    repo: https://github.com/simonw/sqlite-utils
+    ref: main
+    kind: cli
+    notes: Library and command line in one distribution.
+
+  - name: pre-commit
+    repo: https://github.com/pre-commit/pre-commit
+    ref: main
+    kind: cli
+    notes: Subprocess-heavy, so most of its work is invisible to a call graph.
+
+  - name: bandit
+    repo: https://github.com/PyCQA/bandit
+    ref: main
+    kind: cli
+    notes: A security tool itself, so its findings are worth eyeballing.
+
+  - name: pylint
+    repo: https://github.com/pylint-dev/pylint
+    ref: main
+    kind: cli
+    notes: Checker classes registered dynamically by name.
+
+  - name: isort
+    repo: https://github.com/PyCQA/isort
+    ref: main
+    kind: cli
+    notes: Small and almost entirely statically resolvable, a best case.
+
+  - name: httpx
+    repo: https://github.com/encode/httpx
+    ref: master
+    kind: library
+    notes: Async throughout, which the builder treats like any other call.
+
+  - name: uvicorn
+    repo: https://github.com/encode/uvicorn
+    ref: master
+    kind: application
+    notes: Server entry point, imports resolved from configuration strings.
+
+  - name: starlette
+    repo: https://github.com/encode/starlette
+    ref: master
+    kind: library
+    notes: Middleware chains assembled at runtime.
+
+  - name: jinja
+    repo: https://github.com/pallets/jinja
+    ref: main
+    kind: library
+    notes: Compiles templates to Python, so its own hot path is generated code.
+
+  - name: click
+    repo: https://github.com/pallets/click
+    ref: main
+    kind: library
+    notes: The decorator convention several other projects here depend on.
+
+  - name: attrs
+    repo: https://github.com/python-attrs/attrs
+    ref: main
+    kind: library
+    notes: Class generation, so many methods never appear as source at all.
+
+  - name: pytest
+    repo: https://github.com/pytest-dev/pytest
+    ref: main
+    kind: cli
+    notes: Hook-based plugin system, resolved by naming convention.
+
+  - name: tox
+    repo: https://github.com/tox-dev/tox
+    ref: main
+    kind: cli
+    notes: src layout with plugin entry points in metadata.
+
+  - name: pandas
+    repo: https://github.com/pandas-dev/pandas
+    ref: main
+    kind: library
+    notes: Very large, partly compiled; measures behaviour at scale.
+
+  - name: airflow
+    repo: https://github.com/apache/airflow
+    ref: main
+    kind: application
+    notes: Largest dependency set here, and the hardest entry-point question.
+
+  - name: mlflow
+    repo: https://github.com/mlflow/mlflow
+    ref: master
+    kind: application
+    notes: Large dependency set, many of them with advisories.
