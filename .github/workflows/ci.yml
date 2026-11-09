@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Reproducible installs: the lockfile is authoritative in CI.
+  UV_FROZEN: "1"
+
+jobs:
+  check:
+    name: Lint, types and unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Development happens on Windows and deployment on Linux, so both are
+        # first-class. Path handling is the usual casualty of testing only one.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the workspace
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type-check
+        run: >
+          uv run mypy packages/core/src packages/platform/src packages/db/src
+          packages/cli/src apps/api/src apps/worker/src
+
+      - name: Unit tests
+        run: uv run pytest -m "not integration and not network and not benchmark"
+
+      - name: Verify the advisory snapshot is consistent with its generator
+        # The snapshot's integrity hash is derived from its contents, so a
+        # hand-edited fixture or a stale regeneration is caught here rather
+        # than by a confusing failure later.
+        shell: bash
+        run: |
+          uv run python tools/build_test_snapshot.py
+          git diff --exit-code -- testdata/advisories
+
+  integration:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sscp
+          POSTGRES_PASSWORD: sscp
+          POSTGRES_DB: sscp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sscp -d sscp"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@localhost:5432/sscp
+      SSCP_TEST_DATABASE_URL: postgresql+psycopg://sscp:sscp@localhost:5432/sscp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the workspace
+        run: uv sync --all-packages
+
+      - name: Apply migrations
+        run: uv run alembic -c infra/alembic.ini upgrade head
+
+      - name: Check migrations match the table definitions
+        # Autogenerate must produce nothing: if it does, tables.py and the
+        # migration history have diverged, and the database would drift from
+        # the schema the application expects.
+        run: |
+          uv run alembic -c infra/alembic.ini check
+
+      - name: Seed the frozen advisory snapshot
+        run: uv run python -m sscp_worker.main seed-advisories testdata/advisories
+
+      - name: Integration tests
+        run: uv run pytest -m "integration and not network and not benchmark"
+
+      - name: Check migrations reverse cleanly
+        # A migration that cannot be rolled back is a migration that cannot be
+        # deployed safely.
+        run: |
+          uv run alembic -c infra/alembic.ini downgrade base
+          uv run alembic -c infra/alembic.ini upgrade head
+
+  docker:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: false
+          load: true
+          tags: sscp:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Liveness responds without a database
+        # Liveness must not depend on the database, so this check runs the
+        # container with no Postgres anywhere near it.
+        run: |
+          docker run -d --name sscp-ci -p 8000:8000 \
+            -e SSCP_ENV=test -e SSCP_SECRET_KEY=ci-only sscp:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/healthz > /tmp/health.json; then
+              break
+            fi
+            sleep 2
+          done
+          cat /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          grep -q 'PyPI' /tmp/health.json
+          docker rm -f sscp-ci

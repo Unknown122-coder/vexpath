@@ -1,0 +1,17 @@
+name: direct-call
+description: >
+  The application calls a vulnerable package through its documented top-level
+  helper. The shortest path runs through the package's own internals, so this
+  checks that dependency graphs are linked and traversed, not just the first hop
+  out of first-party code.
+lockfile: requirements.txt
+entry_points:
+  - app.main:main
+expected:
+  - advisory: CVE-2024-35195
+    component: pkg:pypi/requests@2.31.0
+    verdict: affected
+    reach_status: reachable_confirmed
+    confidence: high
+    must_include_symbols:
+      - requests.sessions.Session.send

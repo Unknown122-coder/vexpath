@@ -1,0 +1,21 @@
+name: dynamic-dispatch
+description: >
+  The vulnerable method is only ever reached through getattr on a name built at
+  runtime. No static analysis can prove this path is taken, and none can prove
+  it is not, so the verdict must be affected with a possible status and low
+  confidence. A confirmed status here is a bug; an unreachable verdict is the
+  worst possible bug.
+lockfile: requirements.txt
+vendored_packages:
+  - vendor/fixturelib
+entry_points:
+  - app.dispatch:handle
+expected:
+  - advisory: CVE-2024-FIXTURE-DYNAMIC
+    component: pkg:pypi/fixturelib@1.0.0
+    verdict: affected
+    reach_status: reachable_possible
+    confidence: low
+    via_dynamic_edges: true
+    must_include_symbols:
+      - fixturelib.handlers.Handler.process

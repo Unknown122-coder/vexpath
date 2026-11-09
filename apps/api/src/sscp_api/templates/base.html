@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Supply-chain security{% endblock %}</title>
+  <meta name="description" content="{% block description %}Reachability-aware vulnerability analysis with signed VEX output.{% endblock %}">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Supply-chain security</span>
+    </a>
+    <nav aria-label="Main">
+      <a href="/docs">API</a>
+      <a href="/healthz">Status</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Version {{ app_version }}
+      {% if environment != 'production' %}
+      <span class="badge badge-muted">{{ environment }}</span>
+      {% endif %}
+    </p>
+  </footer>
+</body>
+</html>

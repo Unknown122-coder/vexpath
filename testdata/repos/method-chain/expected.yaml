@@ -1,0 +1,17 @@
+name: method-chain
+description: >
+  The vulnerable method is reached through an instance held in a local variable
+  and then through an attribute of self. A call graph without assignment
+  tracking resolves neither hop and would wrongly report the package
+  unreachable, so this fixture guards the light inference pass.
+lockfile: requirements.txt
+entry_points:
+  - app.client:build_client
+expected:
+  - advisory: CVE-2024-35195
+    component: pkg:pypi/requests@2.31.0
+    verdict: affected
+    reach_status: reachable_confirmed
+    confidence: high
+    must_include_symbols:
+      - requests.sessions.Session.send

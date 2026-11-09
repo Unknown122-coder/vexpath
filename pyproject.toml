@@ -1,0 +1,146 @@
+[project]
+name = "sscp-workspace"
+version = "0.0.0"
+description = "Workspace root for the software supply-chain security platform. Not published."
+requires-python = ">=3.12"
+dependencies = [
+    "sscp-core",
+    "sscp-platform",
+    "sscp-db",
+    "sscp",
+    "sscp-api",
+    "sscp-worker",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "packages/core",
+    "packages/platform",
+    "packages/db",
+    "packages/cli",
+    "apps/api",
+    "apps/worker",
+]
+
+[tool.uv.sources]
+sscp-core = { workspace = true }
+sscp-platform = { workspace = true }
+sscp-db = { workspace = true }
+sscp = { workspace = true }
+sscp-api = { workspace = true }
+sscp-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    # Starlette's test client requires httpx2; httpx 0.x is what sscp_core
+    # uses for its own outbound calls, so both are present deliberately.
+    "httpx>=0.28",
+    "httpx2>=0.29",
+    "types-pyyaml>=6.0",
+]
+
+# ---------------------------------------------------------------------------
+# Lint and format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["testdata/repos", "packages/db/src/sscp_db/migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive datetimes
+    "T20",       # no print outside the CLI
+    "SIM",       # simplify
+    "PTH",       # use pathlib
+    "RUF",
+    "S",         # bandit: this is a security tool, it should hold itself to it
+    "BLE",       # no bare or blanket excepts without a stated reason
+]
+ignore = [
+    "S101",      # assert is fine in tests and internal invariants
+    "E501",      # line length is handled by the formatter
+    "A003",      # domain models legitimately have fields named id, type, format
+]
+
+[tool.ruff.lint.per-file-ignores]
+"packages/cli/**" = ["T20"]          # the CLI prints by design
+"**/tests/**" = ["S", "T20"]
+"tools/**" = ["T20"]               # developer scripts report progress
+"packages/db/src/sscp_db/migrations/**" = ["N999", "T20", "I001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sscp_core", "sscp_platform", "sscp_db", "sscp", "sscp_api", "sscp_worker"]
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+exclude = ["testdata/repos", "packages/db/src/sscp_db/migrations/versions"]
+
+[[tool.mypy.overrides]]
+# Third-party packages without complete type information.
+module = ["packageurl.*", "msgpack.*", "procrastinate.*", "spdx_tools.*", "celpy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Strictness is enforced on the analysis core; apps are checked less aggressively
+# because framework decorators defeat a lot of inference.
+module = ["sscp_api.*", "sscp_worker.*"]
+disallow_untyped_decorators = false
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["packages", "apps"]
+pythonpath = ["."]
+# importlib import mode: several packages have a tests/ directory, and the
+# default mode would collide on identically named modules.
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+asyncio_mode = "auto"
+# Pin the fixture loop scope rather than inherit a default that pytest-asyncio
+# is in the middle of changing.
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: needs Postgres and MinIO (docker compose up)",
+    "network: reaches the public internet; skipped by default in CI",
+    "benchmark: the reachability benchmark set; slow",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = [
+    "packages/core/src",
+    "packages/platform/src",
+    "packages/db/src",
+    "packages/cli/src",
+    "apps/api/src",
+    "apps/worker/src",
+]
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]

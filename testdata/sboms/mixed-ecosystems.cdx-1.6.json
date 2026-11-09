@@ -1,0 +1,60 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:9c1be5ad-2f73-4a21-8d6e-7b0c4e5f9a02",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-09T00:00:00Z",
+    "component": {
+      "bom-ref": "root",
+      "type": "application",
+      "name": "mixed-ecosystems",
+      "version": "0.1.0"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:pypi/requests@2.31.0",
+      "type": "library",
+      "name": "requests",
+      "version": "2.31.0",
+      "purl": "pkg:pypi/requests@2.31.0",
+      "scope": "required"
+    },
+    {
+      "bom-ref": "pkg:npm/lodash@4.17.20",
+      "type": "library",
+      "name": "lodash",
+      "version": "4.17.20",
+      "purl": "pkg:npm/lodash@4.17.20",
+      "scope": "required"
+    },
+    {
+      "bom-ref": "pkg:npm/%40babel/core@7.23.0",
+      "type": "library",
+      "name": "@babel/core",
+      "version": "7.23.0",
+      "purl": "pkg:npm/%40babel/core@7.23.0",
+      "scope": "optional"
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/gin-gonic/gin@v1.9.1",
+      "type": "library",
+      "name": "github.com/gin-gonic/gin",
+      "version": "v1.9.1",
+      "purl": "pkg:golang/github.com/gin-gonic/gin@v1.9.1",
+      "scope": "required"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "root",
+      "dependsOn": [
+        "pkg:pypi/requests@2.31.0",
+        "pkg:npm/lodash@4.17.20",
+        "pkg:npm/%40babel/core@7.23.0",
+        "pkg:golang/github.com/gin-gonic/gin@v1.9.1"
+      ]
+    }
+  ]
+}

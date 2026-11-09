@@ -1,0 +1,19 @@
+name: unused-transitive
+description: >
+  urllib3 is present in the lockfile as a transitive dependency and is never
+  imported by any reachable module. This is the case that makes the product
+  worth building, and the one where a wrong answer is most damaging, so the
+  expectation is exact: not_affected, with the justification naming the execute
+  path and the impact statement saying the package is never imported.
+lockfile: requirements.txt
+entry_points:
+  - app.compute:main
+expected:
+  - advisory: CVE-2023-45803
+    component: pkg:pypi/urllib3@1.26.17
+    verdict: not_affected
+    reach_status: unreachable
+    confidence: high
+    justification: vulnerable_code_not_in_execute_path
+    must_search_symbols:
+      - urllib3.poolmanager.PoolManager.urlopen

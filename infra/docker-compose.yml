@@ -1,0 +1,95 @@
+# Local development stack: Postgres for all structured data, including the job
+# queue (ADR-0003).
+#
+# Object storage is absent on purpose. Nothing writes an artefact before M3,
+# and MinIO's container images stopped being publicly pullable, so the local
+# emulator is chosen when there is something to store (see ADR-0002).
+#
+#   make up     start everything
+#   make down   stop everything
+
+name: sscp
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sscp
+      POSTGRES_PASSWORD: sscp
+      POSTGRES_DB: sscp
+      # Deterministic collation, so index ordering matches between a developer
+      # machine and CI.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sscp -d sscp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@postgres:5432/sscp
+    command: ["alembic", "-c", "infra/alembic.ini", "upgrade", "head"]
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      SSCP_ENV: local
+      SSCP_BASE_URL: http://localhost:8000
+      SSCP_SECRET_KEY: local-development-only
+      SSCP_LOG_FORMAT: console
+      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@postgres:5432/sscp
+      SSCP_ADVISORY_SNAPSHOT_DIR: /app/testdata/advisories
+    ports:
+      - "8000:8000"
+    volumes:
+      # Source mounted for reload. The virtualenv inside the image is not
+      # shadowed, so dependencies stay the ones the image was built with.
+      - ../packages:/app/packages:ro
+      - ../apps:/app/apps:ro
+    command:
+      - uvicorn
+      - sscp_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/apps/api/src
+      - --reload-dir
+      - /app/packages
+
+  # Loads the frozen advisory snapshot, then exits. The worker gains a
+  # long-running queue consumer in M1, when there is a scheduled job to consume.
+  seed:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      SSCP_DATABASE_URL: postgresql+psycopg://sscp:sscp@postgres:5432/sscp
+      SSCP_LOG_FORMAT: console
+    command: ["python", "-m", "sscp_worker.main", "seed-advisories", "testdata/advisories"]
+
+volumes:
+  postgres-data:

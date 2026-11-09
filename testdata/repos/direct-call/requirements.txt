@@ -1,0 +1,2 @@
+# Pinned, because reachability needs exact versions (ADR-0009).
+requests==2.31.0

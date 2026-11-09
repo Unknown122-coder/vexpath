@@ -1,0 +1,17 @@
+name: subclass-override
+description: >
+  The call site targets a base class whose method is harmless; only the subclass
+  actually in use reaches the vulnerable function. Class-hierarchy analysis must
+  add the override edge, and the shortest path must run through the subclass
+  rather than the base.
+lockfile: requirements.txt
+entry_points:
+  - app.render:main
+expected:
+  - advisory: CVE-2024-22195
+    component: pkg:pypi/jinja2@3.1.2
+    verdict: affected
+    reach_status: reachable_confirmed
+    confidence: high
+    must_include_symbols:
+      - jinja2.filters.do_xmlattr

@@ -1,0 +1,3 @@
+# fixturelib is synthetic and vendored under vendor/ so the fixture needs no
+# network access. See testdata/README.md.
+fixturelib==1.0.0

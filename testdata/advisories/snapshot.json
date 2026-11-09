@@ -1,0 +1,19 @@
+{
+  "content_sha256": "ae9989531cc9abe8ad817884edf3a670f05b15eb8d1b28033cfd0195b15a5bb4",
+  "counts": {
+    "PyPI": {
+      "advisories": 7,
+      "with_symbols": 5
+    },
+    "npm": {
+      "advisories": 1,
+      "with_symbols": 0
+    }
+  },
+  "created_at": "2026-11-09T00:00:00Z",
+  "ecosystems": [
+    "PyPI",
+    "npm"
+  ],
+  "id": "test-snapshot-0001"
+}

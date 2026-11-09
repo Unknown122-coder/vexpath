@@ -1,0 +1,4 @@
+# urllib3 arrives as a transitive dependency of requests, but this application
+# never makes a network call.
+requests==2.31.0
+urllib3==1.26.17

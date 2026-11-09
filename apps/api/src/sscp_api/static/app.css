@@ -1,0 +1,233 @@
+/* Stylesheet for the server-rendered UI.
+ *
+ * Hand-written at this milestone. The real interface arrives in M4, compiled by
+ * the standalone Tailwind binary (ADR-0011); until there is an interface worth
+ * building a pipeline for, a single readable file is the right amount of
+ * machinery.
+ *
+ * Colours are defined once as custom properties on :root and overridden under
+ * prefers-color-scheme, so every value has a light and a dark form in one place.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --border: #e4e4e1;
+  --text: #1a1a18;
+  --text-muted: #63635e;
+  --accent: #1f5e4f;
+  --accent-text: #ffffff;
+  --code-bg: #f1f1ee;
+
+  --radius: 8px;
+  --measure: 68ch;
+  --gap: 1.5rem;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161715;
+    --surface: #1e201d;
+    --border: #32352f;
+    --text: #ececea;
+    --text-muted: #a3a39d;
+    --accent: #7fd1bb;
+    --accent-text: #10211c;
+    --code-bg: #262822;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Visible only when focused, so keyboard users can bypass the header. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+  z-index: 10;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Layout --------------------------------------------------------------- */
+
+.site-header,
+main,
+.site-footer {
+  max-width: var(--measure);
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+}
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 1.25rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.site-header nav {
+  display: flex;
+  gap: 1.1rem;
+  font-size: 0.925rem;
+}
+
+main {
+  padding-block: 1rem 3rem;
+}
+
+.site-footer {
+  padding-block: 1.5rem 2.5rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  border-top: 1px solid var(--border);
+}
+
+/* --- Content -------------------------------------------------------------- */
+
+h1 {
+  font-size: clamp(1.75rem, 1.2rem + 2.2vw, 2.5rem);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  margin-block: 1rem 0.75rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin-block: 0 0.75rem;
+}
+
+h3 {
+  font-size: 1rem;
+  margin-block: 0 0.25rem;
+}
+
+.lead {
+  font-size: 1.0625rem;
+  color: var(--text-muted);
+}
+
+.hero {
+  padding-block: 1rem 2rem;
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-block-start: 1.5rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.install,
+code {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  background: var(--code-bg);
+}
+
+.panel {
+  margin-block-start: var(--gap);
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.steps p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.badge-muted {
+  background: var(--code-bg);
+  color: var(--text-muted);
+}
+
+.meta {
+  margin-block-end: 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}

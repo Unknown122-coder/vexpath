@@ -1,0 +1,25 @@
+# Line endings are LF in the repository, on every platform.
+#
+# Development happens on Windows and deployment on Linux. Without this, a file
+# regenerated on one would differ from the same file regenerated on the other,
+# and CI checks that compare generated output against the committed version
+# would fail for a reason that has nothing to do with the code.
+* text=auto eol=lf
+
+# Generated, but committed and reviewed. Marked so that diffs stay readable
+# while the file still shows up in review.
+uv.lock linguist-generated=true -diff
+testdata/advisories/advisories.jsonl linguist-generated=true
+
+# Fixture repositories are inputs to the analyser, not project source. They are
+# excluded from language statistics so they do not distort them.
+testdata/repos/** linguist-vendored=true
+
+# Binary, so no end-of-line conversion and no attempt to diff.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.msgpack binary
+*.zst binary
