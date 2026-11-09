@@ -161,6 +161,11 @@ class SourceRoot:
     #: Distribution this source belongs to. None means first-party code, which
     #: is what entry-point detection and reporting treat as "the project".
     package: str | None = None
+    #: When given, only these top-level names are walked. Needed for a shared
+    #: directory such as site-packages, where the root holds every installed
+    #: distribution and walking all of them would build one enormous graph
+    #: instead of one per package.
+    top_level: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +246,9 @@ def build(
     parsed = 0
 
     for root in roots:
-        for path, module_name in _discover(root.path, include_tests=include_tests):
+        for path, module_name in _discover(
+            root.path, include_tests=include_tests, top_level=root.top_level
+        ):
             try:
                 source = path.read_text(encoding="utf-8")
                 tree = ast.parse(source, filename=str(path))
@@ -292,11 +299,28 @@ def build(
     )
 
 
-def _discover(root: Path, *, include_tests: bool) -> Iterator[tuple[Path, str]]:
+def _discover(
+    root: Path, *, include_tests: bool, top_level: tuple[str, ...] = ()
+) -> Iterator[tuple[Path, str]]:
     """Yield source files and their dotted module names."""
     if not root.is_dir():
         return
-    for path in sorted(root.rglob("*.py")):
+    # Walking only the named top-level entries, rather than the whole root and
+    # filtering after, matters for site-packages: the directory holds hundreds
+    # of distributions and globbing all of them would dominate a scan.
+    if top_level:
+        candidates: list[Path] = []
+        for name in top_level:
+            package_directory = root / name
+            if package_directory.is_dir():
+                candidates.extend(sorted(package_directory.rglob("*.py")))
+            module_file = root / f"{name}.py"
+            if module_file.is_file():
+                candidates.append(module_file)
+    else:
+        candidates = sorted(root.rglob("*.py"))
+
+    for path in candidates:
         relative = path.relative_to(root)
         if any(part in EXCLUDED_DIRECTORIES for part in relative.parts[:-1]) and not include_tests:
             continue
@@ -954,7 +978,9 @@ def detect_entry_points(
     for root in roots:
         if root.package is not None:
             continue
-        for path, module_name in _discover(root.path, include_tests=include_tests):
+        for path, module_name in _discover(
+            root.path, include_tests=include_tests, top_level=root.top_level
+        ):
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             except (OSError, UnicodeDecodeError, SyntaxError, ValueError):

@@ -44,16 +44,19 @@ def test_version_reports_capabilities_alongside_versions() -> None:
     payload = json.loads(result.stdout)
     assert payload["reachability_ecosystems"] == ["PyPI"]
     assert payload["results_schema"] == "vexpath.results/1"
-    # The build states that reachability is unavailable rather than letting a
-    # reader assume a verdict was reachability-informed.
-    assert payload["reachability_available"] is False
+    # A reader of a report has to know what this build can analyse, because a
+    # cleared finding means nothing unless reachability actually ran.
+    assert payload["reachability_available"] is True
 
 
 def test_version_lists_the_lockfiles_it_understands() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert "uv.lock" in result.stdout
-    assert "not available in this build" in result.stdout
+    # Reachability covers fewer ecosystems than matching does, and the table
+    # says which rather than implying it covers everything.
+    assert "reachability    PyPI" in result.stdout
+    assert "every ecosystem OSV publishes" in result.stdout
 
 
 def test_bare_invocation_shows_help_rather_than_doing_something() -> None:
@@ -149,7 +152,7 @@ def test_sbom_lockfiles_without_one_is_a_configuration_error(tmp_path: Path) -> 
 
 
 def test_scan_reports_the_expected_finding(env: None, fixture_repos_dir: Path) -> None:
-    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call")])
+    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach"])
     assert result.exit_code == 0
     assert "CVE-2024-35195" in result.stdout
     assert "requests 2.31.0 -> 2.32.0" in result.stdout
@@ -158,27 +161,27 @@ def test_scan_reports_the_expected_finding(env: None, fixture_repos_dir: Path) -
 def test_scan_succeeds_by_default_even_with_findings(env: None, fixture_repos_dir: Path) -> None:
     # Until policy evaluation lands, failing the build is opt-in rather than
     # a surprise.
-    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call")])
+    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach"])
     assert result.exit_code == 0
 
 
 def test_scan_can_be_asked_to_fail_on_findings(env: None, fixture_repos_dir: Path) -> None:
     result = runner.invoke(
-        app, ["scan", str(fixture_repos_dir / "direct-call"), "--fail-on-findings"]
+        app, ["scan", str(fixture_repos_dir / "direct-call"), "--fail-on-findings", "--no-reach"]
     )
     assert result.exit_code == int(ExitCode.POLICY_FAILED)
 
 
 def test_scan_exits_cleanly_when_nothing_is_found(env: None, tmp_path: Path) -> None:
     (tmp_path / "requirements.txt").write_text("requests==2.32.0\n", encoding="utf-8")
-    result = runner.invoke(app, ["scan", str(tmp_path), "--fail-on-findings"])
+    result = runner.invoke(app, ["scan", str(tmp_path), "--fail-on-findings", "--no-reach"])
     assert result.exit_code == 0
     assert "No advisories match" in result.stdout
 
 
 def test_scan_json_output_matches_the_results_schema(env: None, fixture_repos_dir: Path) -> None:
     result = runner.invoke(
-        app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json"]
+        app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"]
     )
     payload = json.loads(result.stdout)
     assert payload["schema"] == "vexpath.results/1"
@@ -188,7 +191,7 @@ def test_scan_json_output_matches_the_results_schema(env: None, fixture_repos_di
 
 def test_scan_sarif_output_is_well_formed(env: None, fixture_repos_dir: Path) -> None:
     result = runner.invoke(
-        app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "sarif"]
+        app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "sarif", "--no-reach"]
     )
     document = json.loads(result.stdout)
     assert document["version"] == "2.1.0"
@@ -197,20 +200,72 @@ def test_scan_sarif_output_is_well_formed(env: None, fixture_repos_dir: Path) ->
 
 def test_scan_markdown_output_is_a_comment(env: None, fixture_repos_dir: Path) -> None:
     result = runner.invoke(
-        app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "markdown"]
+        app, ["scan", str(fixture_repos_dir / "direct-call"), "--format", "markdown", "--no-reach"]
     )
     assert result.stdout.startswith("## Supply-chain scan")
 
 
-def test_scan_says_reachability_is_unavailable(env: None, fixture_repos_dir: Path) -> None:
+def test_scan_says_when_reachability_is_turned_off(env: None, fixture_repos_dir: Path) -> None:
     # Letting someone believe a verdict was reachability-informed when it was
     # not is the failure this message prevents.
-    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call")])
-    assert "Reachability analysis is not available" in result.stderr
+    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach"])
+    assert "Reachability analysis is off" in result.stderr
+    assert "No finding will be cleared" in result.stderr
+    assert "not run" in result.stdout
+
+
+def test_scan_clears_a_finding_when_given_the_environment(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    """The flag that makes the report short, exercised through the real command."""
+    import shutil
+
+    site_packages = tmp_path / "env" / "Lib" / "site-packages"
+    site_packages.mkdir(parents=True)
+    vendor = fixture_repos_dir / "unused-transitive" / "vendor"
+    for distribution, version, import_name in (
+        ("requests", "2.31.0", "requests"),
+        ("urllib3", "1.26.17", "urllib3"),
+    ):
+        shutil.copytree(vendor / import_name, site_packages / import_name)
+        info = site_packages / f"{distribution}-{version}.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_text(
+            f"Name: {distribution}\nVersion: {version}\n", encoding="utf-8"
+        )
+        (info / "top_level.txt").write_text(f"{import_name}\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(fixture_repos_dir / "unused-transitive"),
+            "--environment",
+            str(tmp_path / "env"),
+            "--no-cache",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "2 not affected" in result.stdout
+    # Cleared findings are out of the way by default, and named on request.
+    assert "CVE-2023-45803" not in result.stdout
+
+    shown = runner.invoke(
+        app,
+        [
+            "scan",
+            str(fixture_repos_dir / "unused-transitive"),
+            "--environment",
+            str(tmp_path / "env"),
+            "--no-cache",
+            "--show-cleared",
+        ],
+    )
+    assert "CVE-2023-45803" in shown.stdout
 
 
 def test_scan_names_the_snapshot_it_used(env: None, fixture_repos_dir: Path) -> None:
-    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call")])
+    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach"])
     assert "test-snapshot-0001" in result.stderr
 
 
@@ -221,7 +276,7 @@ def test_scan_warns_when_it_has_no_snapshot(
     # Point the live source at a port nothing listens on, so the command fails
     # fast rather than reaching the internet.
     monkeypatch.setenv("VEXPATH_OSV_API_BASE", "http://127.0.0.1:1")
-    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call")])
+    result = runner.invoke(app, ["scan", str(fixture_repos_dir / "direct-call"), "--no-reach"])
     assert "will not be reproducible" in result.stderr
     assert result.exit_code == int(ExitCode.ANALYSIS_ERROR)
     assert "vexpath advisory sync" in result.stderr
@@ -230,7 +285,13 @@ def test_scan_warns_when_it_has_no_snapshot(
 def test_scan_can_analyse_a_supplied_sbom(env: None, sboms_dir: Path, tmp_path: Path) -> None:
     result = runner.invoke(
         app,
-        ["scan", str(tmp_path), "--sbom", str(sboms_dir / "direct-call.cdx-1.6.json")],
+        [
+            "scan",
+            str(tmp_path),
+            "--sbom",
+            str(sboms_dir / "direct-call.cdx-1.6.json"),
+            "--no-reach",
+        ],
     )
     assert result.exit_code == 0
     assert "urllib3" in result.stdout

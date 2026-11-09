@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 from vexpath_core.enums import (
     ComponentScope,
@@ -50,6 +51,11 @@ class MatchReport:
     #: Identifier of the advisory corpus used, or None if it was queried live
     #: and the result is therefore not reproducible.
     advisory_snapshot_id: str | None
+    #: The full advisory behind each finding, keyed by finding id. The
+    #: reachability stage needs the vulnerable symbols, which a finding carries
+    #: no room for, and re-querying the source for them would be wasteful and
+    #: could read a different corpus.
+    advisories: dict[str, Advisory] = dataclass_field(default_factory=dict)
     #: Components that were skipped, and why.
     skipped: tuple[str, ...] = ()
     #: Ecosystems present that reachability cannot analyse (ADR-0012).
@@ -95,11 +101,13 @@ def match(
     candidates = source.advisories_for(purls)
 
     findings: list[Finding] = []
+    behind: dict[str, Advisory] = {}
     for component in components:
         for advisory in candidates.get(component.purl, ()):
             finding = _finding_for(component, advisory)
             if finding is not None:
                 findings.append(finding)
+                behind[finding.id] = advisory
 
     unsupported = tuple(
         sorted(
@@ -115,6 +123,7 @@ def match(
     return MatchReport(
         findings=tuple(findings),
         advisory_snapshot_id=source.snapshot_id,
+        advisories=behind,
         skipped=tuple(skipped),
         unsupported_reachability_ecosystems=unsupported,
     )

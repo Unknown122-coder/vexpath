@@ -91,15 +91,56 @@ All six fixtures produce their declared verdict, status and confidence, with the
 call path as evidence. The benchmark asserts separately, ahead of everything
 else, that nothing expecting `affected` is ever cleared.
 
+### Done: symbols from fix commits
+
+`core.patchdiff` turns an advisory's fix commit into the set of symbols the fix
+changed, which is where vulnerable symbols come from for the 88.7 % of Python
+advisories that carry a recoverable commit.
+
+- `references`: picks the best fix reference from an advisory and tiers it, so a
+  reference resolving to an exact commit is distinguished from one naming only a
+  release.
+- `fetch`: a bare `git fetch --depth=2` of one commit, then `git diff` and
+  `git show`. Nothing is checked out and no hook, prompt or inherited
+  configuration can run.
+- `unidiff`, `layout`, `extract`: parse the diff, work out which import names
+  the package actually provides, and map each changed line to the definition
+  containing it.
+
+One finding from real data changed the design. CVE-2024-45399 affects `indico`,
+but its fix commit lives in the `flask-multipass` repository. Symbols extracted
+from a path that anchors on no import name the affected package provides belong
+to a different package, and using them would drive a verdict about the wrong
+code. Those paths now yield nothing and are reported as unmapped.
+
+### Done: dependency graphs, caching, and the whole command
+
+- `core.reach.dependencies`: reads a project's installed distributions from
+  their `METADATA`, `top_level.txt` and `RECORD` as text, and builds a graph for
+  each one whose installed version matches the inventory. A version mismatch is
+  refused rather than graphed, because a graph of the wrong version describes
+  code the project does not ship.
+- `core.reach.cache`: msgpack serialisation and a sharded on-disk cache keyed by
+  package, version and builder version. Written through a temporary file, so an
+  interrupted scan never leaves a half-graph behind. A corrupt entry is deleted
+  and treated as a miss, because a wrong graph produces a wrong verdict.
+- `core.scan` runs the reachability stage, and `vexpath scan` exposes it with
+  `--entry-point`, `--environment`, `--no-cache` and `--no-reach`.
+
+Verified through the real command against a synthetic environment: the
+unused-transitive fixture reports `2 findings | 0 reachable | 2 not affected`,
+and the direct-call fixture reports the path
+`app.main.fetch -> requests.get -> requests.api.get ->
+requests.sessions.Session.request -> requests.sessions.Session.send`, five
+resolved calls into the dependency's internals.
+
 ### Remaining
 
-- `advisory.patchdiff`: resolve each advisory's fix commit and extract the
-  symbols its diff touched. The largest remaining piece, and the one the
-  88.7 % fix-commit coverage measured above exists to serve.
-- Dependency graph building from downloaded archives, the global cache, and the
-  `callgraph.build` worker. The fixtures vendor their dependencies, so the
-  engine is exercised; real scans need the cache.
-- Wiring reachability into `core.scan` and the CLI, including `vexpath reach`.
+- `vexpath reach`, for triaging a single advisory against a project.
+- The `advisory.patchdiff` worker job, wiring extraction into the sync pipeline
+  and storing symbols in the database.
+- Dependency graphs from downloaded archives, for packages a scan's environment
+  does not have installed.
 - EPSS and CISA KEV enrichment, carried from M1.
 - The benchmark over 30 real repositories.
 

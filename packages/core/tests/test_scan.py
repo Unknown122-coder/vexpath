@@ -1,8 +1,14 @@
 """End-to-end scans against the fixture repositories.
 
-These exercise the whole M1 pipeline: find a lockfile, build an inventory,
+These exercise inventory and matching: find a lockfile, build an inventory,
 match it against the frozen corpus, and produce results. They run entirely
 offline, which is the property that makes a scan reproducible.
+
+Reachability is off in most of them. Left on, each would read whatever
+dependencies happen to be installed in the environment running the suite, and
+two developers would see different verdicts for the same fixture. The
+reachability stage is covered in ``test_reach_environment.py``, against an
+environment built on purpose.
 """
 
 from __future__ import annotations
@@ -27,10 +33,15 @@ def source(snapshot_dir: Path) -> SnapshotSource:
     return SnapshotSource(snapshot_dir)
 
 
+def matching_only(root: Path, source: SnapshotSource) -> ScanResults:
+    """Scan with reachability off, so the result depends only on the fixture."""
+    return scan(root, source, options=ScanOptions(reachability=False), clock=CLOCK)
+
+
 def test_a_scan_reports_the_expected_finding(
     fixture_repos_dir: Path, source: SnapshotSource
 ) -> None:
-    results = scan(fixture_repos_dir / "direct-call", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "direct-call", source)
 
     assert results.schema_version == RESULTS_SCHEMA
     assert results.mode is ScanMode.CLI
@@ -44,7 +55,7 @@ def test_a_scan_reports_the_expected_finding(
 def test_a_scan_against_a_snapshot_is_reproducible(
     fixture_repos_dir: Path, source: SnapshotSource
 ) -> None:
-    results = scan(fixture_repos_dir / "direct-call", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "direct-call", source)
     assert results.is_reproducible
     assert results.advisory_snapshot_id == "test-snapshot-0001"
 
@@ -52,8 +63,8 @@ def test_a_scan_against_a_snapshot_is_reproducible(
 def test_two_scans_of_an_unchanged_project_agree(
     fixture_repos_dir: Path, source: SnapshotSource
 ) -> None:
-    first = scan(fixture_repos_dir / "unused-transitive", source, clock=CLOCK)
-    second = scan(fixture_repos_dir / "unused-transitive", source, clock=CLOCK)
+    first = matching_only(fixture_repos_dir / "unused-transitive", source)
+    second = matching_only(fixture_repos_dir / "unused-transitive", source)
 
     assert first.sbom is not None
     assert second.sbom is not None
@@ -64,23 +75,47 @@ def test_two_scans_of_an_unchanged_project_agree(
     ]
 
 
-def test_nothing_is_cleared_without_reachability(
+def test_nothing_is_cleared_when_reachability_does_not_run(
     fixture_repos_dir: Path, source: SnapshotSource
 ) -> None:
-    """The unused dependency is genuinely unreachable, and this build cannot
+    """The unused dependency is genuinely unreachable, and this scan did not
     prove it, so it must be reported rather than cleared."""
-    results = scan(fixture_repos_dir / "unused-transitive", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "unused-transitive", source)
 
     urllib3 = next(f for f in results.findings if f.component.name == "urllib3")
     assert urllib3.verdict is Verdict.AFFECTED
     assert urllib3.reach is None
     assert results.counts_by_verdict()[Verdict.NOT_AFFECTED] == 0
+    # Said out loud, so a short report is never mistaken for a clean one.
+    assert any("not run" in note for note in results.analysis_notes)
+
+
+def test_nothing_is_cleared_when_a_dependency_cannot_be_analysed(
+    fixture_repos_dir: Path, source: SnapshotSource, tmp_path: Path
+) -> None:
+    """Absent evidence is not evidence of absence.
+
+    Reachability ran and found no path, but only because the dependency's
+    source was nowhere to be read. That must not clear anything.
+    """
+    empty = tmp_path / "env"
+    (empty / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+    options = ScanOptions(environment=empty, use_cache=False)
+    results = scan(fixture_repos_dir / "unused-transitive", source, options=options, clock=CLOCK)
+
+    assert results.findings
+    assert results.counts_by_verdict()[Verdict.NOT_AFFECTED] == 0
+    for finding in results.findings:
+        assert finding.verdict is Verdict.UNDER_INVESTIGATION
+        assert finding.reach is not None
+        assert not finding.reach.status.may_suppress
+    assert any("no source to analyse" in note for note in results.analysis_notes)
 
 
 def test_a_module_level_advisory_is_matched(
     fixture_repos_dir: Path, source: SnapshotSource
 ) -> None:
-    results = scan(fixture_repos_dir / "module-level", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "module-level", source)
     assert [f.advisory.id for f in results.findings] == ["CVE-2020-14343"]
     assert results.findings[0].advisory.severity is Severity.CRITICAL
 
@@ -90,14 +125,14 @@ def test_a_synthetic_dependency_still_matches(
 ) -> None:
     # The dynamic-dispatch fixture vendors a synthetic package; matching must
     # work on the lockfile entry regardless of where the code lives.
-    results = scan(fixture_repos_dir / "dynamic-dispatch", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "dynamic-dispatch", source)
     assert [f.advisory.id for f in results.findings] == ["CVE-2024-FIXTURE-DYNAMIC"]
 
 
 def test_an_explicit_sbom_can_be_analysed_instead_of_a_lockfile(
     sboms_dir: Path, source: SnapshotSource, tmp_path: Path
 ) -> None:
-    options = ScanOptions(sbom_path=sboms_dir / "direct-call.cdx-1.6.json")
+    options = ScanOptions(sbom_path=sboms_dir / "direct-call.cdx-1.6.json", reachability=False)
     results = scan(tmp_path, source, options=options, clock=CLOCK)
     found = {finding.component.name for finding in results.findings}
     assert found == {"requests", "urllib3"}
@@ -111,6 +146,7 @@ def test_development_dependencies_can_be_excluded(
     options = ScanOptions(
         sbom_path=sboms_dir / "direct-call.cdx-1.6.json",
         include_scopes=frozenset({ComponentScope.RUNTIME}),
+        reachability=False,
     )
     results = scan(tmp_path, source, options=options, clock=CLOCK)
     assert results.sbom is not None
@@ -120,7 +156,7 @@ def test_development_dependencies_can_be_excluded(
 def test_unsupported_ecosystems_are_declared(
     sboms_dir: Path, source: SnapshotSource, tmp_path: Path
 ) -> None:
-    options = ScanOptions(sbom_path=sboms_dir / "mixed-ecosystems.cdx-1.6.json")
+    options = ScanOptions(sbom_path=sboms_dir / "mixed-ecosystems.cdx-1.6.json", reachability=False)
     results = scan(tmp_path, source, options=options, clock=CLOCK)
     assert set(results.unsupported_reachability_ecosystems) >= {"npm", "Go"}
 
@@ -128,7 +164,7 @@ def test_unsupported_ecosystems_are_declared(
 def test_results_round_trip_through_json(fixture_repos_dir: Path, source: SnapshotSource) -> None:
     # The results document is the contract with the Action and the platform, so
     # it has to survive serialisation exactly.
-    results = scan(fixture_repos_dir / "direct-call", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "direct-call", source)
     payload = results.model_dump_json(by_alias=True)
     restored = ScanResults.model_validate_json(payload)
     assert restored == results
@@ -138,7 +174,7 @@ def test_results_round_trip_through_json(fixture_repos_dir: Path, source: Snapsh
 def test_the_summary_line_counts_what_it_says(
     fixture_repos_dir: Path, source: SnapshotSource
 ) -> None:
-    results = scan(fixture_repos_dir / "unused-transitive", source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / "unused-transitive", source)
     summary = results.summary_line()
     assert summary.startswith("2 findings")
     assert "0 reachable" in summary
@@ -156,7 +192,7 @@ def test_a_project_with_no_lockfile_fails_rather_than_reporting_clean(
     from vexpath_core.sbom import LockfileError
 
     with pytest.raises(LockfileError):
-        scan(tmp_path, source, clock=CLOCK)
+        matching_only(tmp_path, source)
 
 
 @pytest.mark.parametrize(
@@ -177,5 +213,5 @@ def test_every_affected_fixture_produces_its_finding(
         (fixture_repos_dir / fixture / "expected.yaml").read_text(encoding="utf-8")
     )
     wanted = {entry["advisory"] for entry in expected["expected"] if entry["verdict"] == "affected"}
-    results = scan(fixture_repos_dir / fixture, source, clock=CLOCK)
+    results = matching_only(fixture_repos_dir / fixture, source)
     assert wanted <= {finding.advisory.id for finding in results.findings}

@@ -84,6 +84,36 @@ def command(
         bool,
         typer.Option("--show-cleared", help="List findings that were cleared, too."),
     ] = False,
+    entry_point: Annotated[
+        str | None,
+        typer.Option(
+            "--entry-point",
+            "-e",
+            help=(
+                "Comma-separated entry points to start the reachability search "
+                "from, as module.path:function. Nothing beats being told how the "
+                "application starts."
+            ),
+        ),
+    ] = None,
+    environment: Annotated[
+        Path | None,
+        typer.Option(
+            "--environment",
+            exists=True,
+            file_okay=False,
+            help=(
+                "Virtual environment holding the installed dependencies. "
+                "Defaults to the one this command is running in."
+            ),
+        ),
+    ] = None,
+    no_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-cache", help="Rebuild dependency graphs instead of reusing cached ones."
+        ),
+    ] = False,
     fail_on_findings: Annotated[
         bool,
         typer.Option(
@@ -97,17 +127,15 @@ def command(
 ) -> None:
     """Scan a project for vulnerable dependencies.
 
-    Reachability analysis is not implemented yet, so every scan currently
-    behaves as ``--no-reach``: findings are reported as affected or under
-    investigation, and nothing is ever cleared. That is the honest state of the
-    tool rather than a silent limitation.
+    Reachability analysis runs by default and is what makes the report short:
+    a finding is cleared only when the vulnerable code provably cannot run.
+    Pass ``--no-reach`` to report matching alone, in which case nothing is
+    cleared and the output says so.
     """
-    if not no_reach:
-        # Saying this plainly beats letting someone believe a verdict was
-        # reachability-informed when it was not.
+    if no_reach:
         note(
-            "Reachability analysis is not available in this build, so this scan "
-            "reports matching only. No finding will be cleared."
+            "Reachability analysis is off, so this reports matching only. No "
+            "finding will be cleared."
         )
 
     source = _advisory_source(snapshot)
@@ -116,7 +144,17 @@ def command(
         if ignore_dev
         else frozenset(ComponentScope)
     )
-    options = ScanOptions(sbom_path=sbom, lockfile=lockfile, include_scopes=scopes)
+    options = ScanOptions(
+        sbom_path=sbom,
+        lockfile=lockfile,
+        include_scopes=scopes,
+        reachability=not no_reach,
+        entry_points=tuple(
+            entry.strip() for entry in (entry_point or "").split(",") if entry.strip()
+        ),
+        environment=environment,
+        use_cache=not no_cache,
+    )
 
     try:
         results = run_scan(path, source, options=options)

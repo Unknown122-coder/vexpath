@@ -67,7 +67,7 @@ def version(
         "matching_ecosystems": "every ecosystem OSV publishes",
         "native_lockfile_ecosystems": sorted(NATIVE_LOCKFILE_ECOSYSTEMS),
         "lockfiles": list(LOCKFILE_PRIORITY),
-        "reachability_available": False,
+        "reachability_available": True,
     }
     if output is OutputFormat.JSON:
         emit_json(payload)
@@ -80,8 +80,7 @@ def version(
         "",
         f"matching        {payload['matching_ecosystems']}",
         f"lockfiles       {', '.join(LOCKFILE_PRIORITY)}",
-        f"reachability    {', '.join(sorted(REACHABILITY_ECOSYSTEMS))} "
-        f"(not available in this build)",
+        f"reachability    {', '.join(sorted(REACHABILITY_ECOSYSTEMS))}",
     ]
     emit("\n".join(lines) + "\n")
 

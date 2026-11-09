@@ -126,6 +126,8 @@ def _header(results: ScanResults) -> list[str]:
             f"Reachability analysis does not cover {listed}. Findings for those "
             f"components are reported as under investigation, not cleared."
         )
+    for note in results.analysis_notes:
+        lines.append(note if note.endswith(".") else f"{note}.")
     return lines
 
 

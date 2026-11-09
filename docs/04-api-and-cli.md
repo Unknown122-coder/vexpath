@@ -8,7 +8,7 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 |---|---|
 | `vexpath sbom generate [PATH] [-o sbom.cdx.json] [--format cyclonedx\|spdx]` | Generate an SBOM from lockfiles (native) or via Syft (`--syft`) |
 | `vexpath sbom validate FILE` | Schema-validate a CycloneDX/SPDX document; report CISA minimum-elements gaps |
-| `vexpath scan [PATH] [--sbom FILE] [--no-reach] [--policy FILE\|preset] [--upload] [--sign]` | Full pipeline: SBOM → match → reachability → VEX → policy. The default command. |
+| `vexpath scan [PATH] [--sbom FILE] [--entry-point SYM] [--environment DIR] [--no-reach] [--no-cache] [--policy FILE\|preset] [--upload] [--sign]` | Full pipeline: SBOM → match → reachability → VEX → policy. The default command. |
 | `vexpath reach [PATH] --advisory CVE-… [--symbol …]` | Reachability for one advisory; prints all paths. Debugging and triage. |
 | `vexpath vex export [--format openvex\|cyclonedx] [-o FILE]` | Write VEX for the last scan |
 | `vexpath attest sign FILE --type sbom\|vex` | Produce a signed in-toto statement (keyless by default; `--key` for a static key) |
@@ -18,6 +18,19 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 | `vexpath advisory sync [--ecosystem PyPI,npm] [--dir ~/.cache/vexpath]` | Download a local advisory snapshot for offline/air-gapped use |
 | `vexpath callgraph build PATH` / `vexpath callgraph show SYMBOL` | Build/inspect graphs; used in development and support |
 | `vexpath login` / `vexpath whoami` | Store an API key for uploads |
+
+Implemented today: `sbom generate|validate|lockfiles`, `scan` (through
+reachability, without policy, VEX or upload), `advisory sync|show|coverage`, and
+`version`. The rest arrive with the milestone that needs them, and the table is
+the target shape rather than a claim about the current build.
+
+Reachability needs the project's dependencies readable on disk. `--environment`
+names the virtual environment holding them, defaulting to the one `vexpath` is
+running in; `--entry-point` takes a comma-separated list of `module.path:function`
+and overrides every inference; `--no-cache` rebuilds dependency graphs instead of
+reusing cached ones, which is how a cold build is measured. A finding is cleared
+only when the dependency's own code was traversed and no path reached the
+advisory's symbols.
 
 ### `.vexpath.yml`
 

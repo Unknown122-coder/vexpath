@@ -7,11 +7,12 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > Status: **M1 complete, M2 in progress** (2026-11-09). The scanner reads
 > seven lockfile formats and both SBOM standards, matches against a
 > reproducible advisory corpus, and reports in table, JSON, Markdown and
-> SARIF. The reachability engine now works end to end against the fixture
-> suite: it builds call graphs, links them, searches for the vulnerable
-> symbols and produces a verdict with the call path as evidence. What it
-> still needs is the worker that extracts those symbols from real fix
-> commits, and the cache of dependency graphs. See
+> SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
+> project and its installed dependencies, searches for each advisory's
+> vulnerable symbols, and clears a finding only when no path reaches them.
+> Symbols come from the advisory's fix commit. What remains in this milestone
+> is the `vexpath reach` triage command, the worker that stores extracted
+> symbols, and the benchmark over 30 real repositories. See
 > [docs/05-roadmap.md](docs/05-roadmap.md).
 
 ## Quick start
@@ -32,11 +33,19 @@ make up                            # Postgres, migrations, API and seeded adviso
 curl localhost:8000/healthz
 ```
 
-What a scan says today, and what it does not: `vexpath scan` reports findings
-as **affected** or **under investigation**, never cleared, because the
-reachability engine is not yet wired into the command. The engine itself
-decides all five outcomes and is exercised by the benchmark in
-`packages/core/tests/test_reach_fixtures.py`.
+What a scan says, and what it refuses to say. A finding is cleared only when
+the analysis traversed the dependency's own code and found no path to the
+functions the fix changed. Everything else is reported. In particular a
+dependency whose source could not be read is **under investigation**, never
+cleared: a direct call to a vulnerable symbol is still visible, so "reachable"
+stays sound, but an absence of paths through code nobody looked at proves
+nothing.
+
+Reachability needs the dependencies on disk. By default it reads the
+environment the command is running in; point it elsewhere with
+`--environment path/to/.venv`, and tell it how the application starts with
+`--entry-point mypackage.cli:main`, which beats any inference. `--no-reach`
+reports matching alone and says so in the output.
 
 `make help` lists every target. No Node, npm or bundler is involved anywhere (ADR-0011).
 

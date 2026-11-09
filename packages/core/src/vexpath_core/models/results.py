@@ -82,6 +82,12 @@ class ScanResults(Base):
     #: reachability, so reports can say so plainly rather than let a reader
     #: assume "under investigation" means "checked".
     unsupported_reachability_ecosystems: tuple[str, ...] = ()
+    #: Limitations of this particular run, in plain language: dependencies
+    #: whose source was unavailable, caches that were cold, graphs that were
+    #: incomplete. Separate from the ecosystem list because "we do not support
+    #: this language" and "we could not find this package" are different facts
+    #: and a reader needs to tell them apart.
+    analysis_notes: tuple[str, ...] = ()
 
     @property
     def is_reproducible(self) -> bool:
