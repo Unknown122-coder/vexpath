@@ -151,6 +151,7 @@ def scan(
             slug=resolved_options.project_slug,
             git_ref=resolved_options.git_ref,
             git_sha=resolved_options.git_sha,
+            lockfile=scanned_lockfile(root, resolved_options),
         ),
         sbom=SbomRef(
             format=sbom.format,

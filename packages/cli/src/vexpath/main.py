@@ -17,6 +17,7 @@ from vexpath.commands import attest as attest_commands
 from vexpath.commands import auth as auth_commands
 from vexpath.commands import policy as policy_commands
 from vexpath.commands import reach as reach_command
+from vexpath.commands import report as report_command
 from vexpath.commands import sbom as sbom_commands
 from vexpath.commands import scan as scan_command
 from vexpath.commands import upload as upload_command
@@ -50,6 +51,7 @@ app.command("whoami")(auth_commands.whoami)
 app.command("logout")(auth_commands.logout)
 app.command("scan")(scan_command.command)
 app.command("reach")(reach_command.command)
+app.command("report")(report_command.command)
 app.command("upload")(upload_command.command)
 
 

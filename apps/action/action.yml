@@ -1,0 +1,319 @@
+# The vexpath GitHub Action.
+#
+# A composite action, not a Docker one, and that is the load-bearing decision.
+# Reachability analysis needs the project's dependencies readable on disk: a
+# container action runs in its own filesystem where the caller's virtual
+# environment does not exist, so every finding would come back "package not
+# analysed" and nothing could ever be cleared. Running on the runner, in the
+# caller's own checkout, with the Python they already set up, is what makes the
+# analysis work at all.
+#
+# It does one thing: the analysis, and the gate. It does not upload SARIF,
+# write a comment by itself, or manage a cache. Each of those is two lines in
+# the caller's workflow (see README.md), and a supply-chain security tool that
+# silently pulled three more actions into your build would be an odd thing to
+# trust. What it does instead is produce the files and the outputs those steps
+# need.
+
+name: vexpath
+description: >-
+  Reachability-aware dependency scanning. Fails the build only when vulnerable
+  code can actually run, and shows the call path that proves it.
+author: Akmal Khan
+
+branding:
+  icon: git-merge
+  color: green
+
+inputs:
+  path:
+    description: Directory to scan.
+    required: false
+    default: "."
+  policy:
+    description: >-
+      The gate: a preset name (strict, balanced, kev-only,
+      nothing-outstanding, report-only), a path to a file holding a CEL
+      expression, or the expression itself. The step fails when the policy
+      fails. Left empty, nothing is gated and the scan only reports.
+    required: false
+    default: balanced
+  sbom:
+    description: Analyse this SBOM instead of generating one from a lockfile.
+    required: false
+    default: ""
+  lockfile:
+    description: Use this lockfile instead of searching the directory.
+    required: false
+    default: ""
+  entry-points:
+    description: >-
+      Comma-separated entry points to start the reachability search from, as
+      module.path:function. Nothing beats being told how the application
+      starts.
+    required: false
+    default: ""
+  environment:
+    description: >-
+      Virtual environment holding the installed dependencies. Defaults to the
+      one vexpath runs in, which on a runner is usually not the project's --
+      set this, or set download-missing.
+    required: false
+    default: ""
+  download-missing:
+    description: >-
+      Fetch a dependency's source from the package index when it is not
+      installed. Reaches the network. Without it, a scan of a lockfile alone
+      can confirm findings but never clear them.
+    required: false
+    default: "false"
+  reachability:
+    description: >-
+      Run reachability analysis. Turning it off makes the scan fast and the
+      report long: nothing can be cleared, and the output says so.
+    required: false
+    default: "true"
+  snapshot:
+    description: >-
+      Read advisories from this local snapshot instead of the OSV API, which
+      makes the scan reproducible and offline.
+    required: false
+    default: ""
+  ignore-dev:
+    description: Exclude development dependencies from the analysis.
+    required: false
+    default: "false"
+  summary:
+    description: >-
+      Write the report to the job summary. "auto" writes it only when
+      something needs attention, which is what stops a green build from
+      producing a page nobody reads.
+    required: false
+    default: auto
+  comment:
+    description: >-
+      Comment on the pull request with the report. "auto" comments only when
+      something needs attention. Needs pull-requests: write. Uses the gh CLI
+      that is already on every GitHub-hosted runner.
+    required: false
+    default: never
+  upload:
+    description: >-
+      Send the result to the vexpath platform. Needs VEXPATH_API_KEY in the
+      environment and a project slug.
+    required: false
+    default: "false"
+  project:
+    description: Project slug to upload to. Required when upload is true.
+    required: false
+    default: ""
+  sign:
+    description: >-
+      Sign the result as an in-toto attestation using the workflow's own
+      identity. Needs id-token: write.
+    required: false
+    default: "false"
+  vexpath-version:
+    description: >-
+      Which vexpath to install. A version specifier for PyPI, or "path:<dir>"
+      to install from a checkout, which is how this repository tests the action
+      against itself.
+    required: false
+    default: ""
+  working-directory:
+    description: Where the output files are written.
+    required: false
+    default: "."
+
+outputs:
+  results:
+    description: Path to the JSON result document.
+    value: ${{ steps.scan.outputs.results }}
+  sarif:
+    description: >-
+      Path to the SARIF file. Upload it with
+      github/codeql-action/upload-sarif if you want code-scanning alerts.
+    value: ${{ steps.render.outputs.sarif }}
+  markdown:
+    description: Path to the Markdown report.
+    value: ${{ steps.render.outputs.markdown }}
+  needs_attention:
+    description: How many findings need attention.
+    value: ${{ steps.scan.outputs.needs_attention }}
+  cleared:
+    description: How many findings the analysis cleared as unreachable.
+    value: ${{ steps.scan.outputs.cleared }}
+  reachable:
+    description: How many findings have vulnerable code that can run.
+    value: ${{ steps.scan.outputs.reachable }}
+  reachability_analysed:
+    description: >-
+      Whether the reachability search ran at all. A cleared count means
+      nothing without this: zero cleared because everything is reachable is a
+      different situation from zero cleared because nobody looked.
+    value: ${{ steps.scan.outputs.reachability_analysed }}
+  policy_passed:
+    description: >-
+      "true" or "false", and empty when no policy was applied -- so a workflow
+      can tell "the gate passed" from "there was no gate".
+    value: ${{ steps.scan.outputs.policy_passed }}
+  cache-dir:
+    description: >-
+      The call-graph cache directory. Cache it with actions/cache and a cold
+      fourteen-minute scan becomes a warm twelve-second one.
+    value: ${{ steps.install.outputs.cache-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install vexpath
+      id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The version this action was released alongside. A test asserts it
+        # matches the command line's own version, so the action cannot ship
+        # pointing at a release that does not exist.
+        pinned="0.0.1"
+        spec='${{ inputs.vexpath-version }}'
+        if [ -z "$spec" ]; then
+          spec="vexpath==${pinned}"
+        fi
+        case "$spec" in
+          path:*)
+            # Installing from a checkout, which is how this repository tests
+            # the action against itself before a release exists.
+            python -m pip install --quiet --upgrade "${spec#path:}"
+            ;;
+          *)
+            python -m pip install --quiet --upgrade "$spec"
+            ;;
+        esac
+        vexpath version
+        # Asked of the tool rather than guessed, so the path cannot drift from
+        # vexpath_core.reach.cache.default_cache_directory. Named as an output
+        # so a caller can cache it: that is the difference between a
+        # twelve-second scan and a fourteen-minute one.
+        cache=$(python -c "from vexpath_core.reach.cache import default_cache_directory as d; print(d().parent)")
+        echo "cache-dir=${cache}" >> "$GITHUB_OUTPUT"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        args=('${{ inputs.path }}' --format json)
+        [ -n '${{ inputs.sbom }}' ] && args+=(--sbom '${{ inputs.sbom }}')
+        [ -n '${{ inputs.lockfile }}' ] && args+=(--lockfile '${{ inputs.lockfile }}')
+        [ -n '${{ inputs.snapshot }}' ] && args+=(--snapshot '${{ inputs.snapshot }}')
+        [ -n '${{ inputs.entry-points }}' ] && args+=(--entry-point '${{ inputs.entry-points }}')
+        [ -n '${{ inputs.environment }}' ] && args+=(--environment '${{ inputs.environment }}')
+        [ '${{ inputs.download-missing }}' = 'true' ] && args+=(--download-missing)
+        [ '${{ inputs.reachability }}' = 'false' ] && args+=(--no-reach)
+        [ '${{ inputs.ignore-dev }}' = 'true' ] && args+=(--ignore-dev)
+
+        # The policy is applied in a separate step, not here. The scan has to
+        # succeed and produce its document even when the gate fails, or there
+        # would be nothing to render, upload or comment with -- and the run
+        # that fails a gate is the one somebody most needs to read.
+        set +e
+        vexpath scan "${args[@]}" > vexpath-results.json
+        status=$?
+        set -e
+        if [ $status -ne 0 ]; then
+          echo "::error::the scan did not complete (exit $status)"
+          exit $status
+        fi
+
+        echo "results=vexpath-results.json" >> "$GITHUB_OUTPUT"
+        # Asked of the tool rather than parsed out of the JSON here. What
+        # counts as "needs attention" or "reachable" is a decision this
+        # project has already made, and a second implementation in YAML would
+        # eventually disagree with the report printed beside it.
+        vexpath report vexpath-results.json --summary >> "$GITHUB_OUTPUT"
+
+    - name: Render
+      id: render
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        # Rendered from the document, never re-scanned. A second analysis
+        # against a corpus that has moved on reaches different verdicts, so the
+        # SARIF uploaded would not match the table in the log.
+        vexpath report vexpath-results.json --format sarif --output vexpath.sarif
+        vexpath report vexpath-results.json --format markdown --output vexpath.md
+        vexpath report vexpath-results.json
+        echo "sarif=vexpath.sarif" >> "$GITHUB_OUTPUT"
+        echo "markdown=vexpath.md" >> "$GITHUB_OUTPUT"
+
+    - name: Job summary
+      if: ${{ inputs.summary != 'never' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        attention='${{ steps.scan.outputs.needs_attention }}'
+        if [ '${{ inputs.summary }}' = 'auto' ] && [ "${attention:-0}" = "0" ]; then
+          echo "nothing needs attention; no summary written"
+          exit 0
+        fi
+        cat vexpath.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on the pull request
+      if: ${{ inputs.comment != 'never' && github.event_name == 'pull_request' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        attention='${{ steps.scan.outputs.needs_attention }}'
+        if [ '${{ inputs.comment }}' = 'auto' ] && [ "${attention:-0}" = "0" ]; then
+          echo "nothing needs attention; no comment written"
+          exit 0
+        fi
+        # The gh CLI is already on every GitHub-hosted runner and
+        # authenticates with the job's token, so this needs no third-party
+        # action and no credential of its own.
+        gh pr comment '${{ github.event.pull_request.number }}' --body-file vexpath.md
+
+    - name: Sign the result
+      if: ${{ inputs.sign == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        python -m pip install --quiet 'vexpath-core[sigstore]'
+        # Keyless, using the workflow's own OIDC identity: there is no key to
+        # provision, rotate or leak, and the signature says which workflow in
+        # which repository produced the document.
+        vexpath attest sign vexpath-results.json --type vex --output vexpath-results.intoto.jsonl
+
+    - name: Upload to the platform
+      if: ${{ inputs.upload == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        if [ -z '${{ inputs.project }}' ]; then
+          echo "::error::upload needs a project slug"
+          exit 3
+        fi
+        if [ -z "${VEXPATH_API_KEY:-}" ]; then
+          echo "::error::upload needs VEXPATH_API_KEY in the environment"
+          exit 3
+        fi
+        vexpath upload vexpath-results.json --project '${{ inputs.project }}'
+
+    - name: Apply the policy
+      if: ${{ inputs.policy != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        # Last, deliberately. Everything above has already run, so the build
+        # that fails a gate still has its report, its SARIF, its comment and
+        # its uploaded record -- which is the run somebody most needs to read.
+        vexpath policy test '${{ inputs.policy }}' --scan vexpath-results.json

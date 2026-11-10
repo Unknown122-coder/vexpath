@@ -22,6 +22,12 @@ class ProjectRef(Base):
     slug: str | None = None
     git_ref: str | None = None
     git_sha: str | None = None
+    #: The lockfile or SBOM the components came from, relative to the project
+    #: root. Recorded because a dependency finding has no line of source code
+    #: and SARIF anchors every alert to a file: without this, a report
+    #: rendered from the document later -- in another job, or by
+    #: ``vexpath report`` -- could only anchor to "unknown".
+    lockfile: str | None = None
 
 
 class SbomRef(Base):

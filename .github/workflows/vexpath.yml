@@ -1,0 +1,122 @@
+# This repository scans itself with its own Action.
+#
+# Dogfooding is not a gesture here. The Action is a composite action: nothing
+# in the unit suite can run it, because a composite action only exists inside
+# a runner. This workflow is the only place the YAML is actually executed, so
+# it is the only thing that can catch a renamed flag, a step that writes an
+# output nobody reads, or a gate that exits before producing its report.
+#
+# It also keeps us honest about the product's own claim. If reachability cannot
+# clear anything in this repository -- which depends on jinja2, cryptography
+# and a dozen others -- then the claim is weaker than the README says, and the
+# place to find that out is here.
+
+name: vexpath
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, because the advisory corpus moves even when the code does not:
+    # a dependency that was fine on Monday can have an advisory by Friday, and
+    # a scan that only runs on a push would not notice until the next one.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # For the SARIF upload below. Nothing else needs a write.
+      security-events: write
+      # So the scan on a pull request can say what it found.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install the project
+        # Installed, not just checked out: reachability needs the
+        # dependencies readable on disk, and an uninstalled project means
+        # every finding comes back "package not analysed" with nothing
+        # cleared.
+        run: uv sync --all-packages
+
+      - name: Restore the call-graph cache
+        uses: actions/cache/restore@v4
+        with:
+          # Keyed on the lockfile, because graphs are per package version: an
+          # unchanged lockfile has unchanged graphs. A cold run takes minutes,
+          # a warm one seconds.
+          path: ~/.cache/vexpath
+          key: vexpath-graphs-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: vexpath-graphs-${{ runner.os }}-
+
+      - name: Scan with our own Action
+        id: vexpath
+        uses: ./apps/action
+        with:
+          # From this checkout rather than from PyPI: the point is to test
+          # what is in this commit, not what was released last week.
+          vexpath-version: path:packages/cli
+          environment: .venv
+          # Frozen snapshot, so a push does not fail because the corpus moved
+          # between two runs of the same commit. The scheduled run below is
+          # what checks against today's advisories.
+          snapshot: ${{ github.event_name == 'schedule' && '' || 'testdata/advisories' }}
+          policy: balanced
+          summary: auto
+          comment: auto
+
+      - name: Upload the SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        # Deliberately always: without this, a failing gate means no alerts,
+        # and the run that failed is the one the alerts are for.
+        if: always()
+        with:
+          sarif_file: ${{ steps.vexpath.outputs.sarif }}
+          category: vexpath
+
+      - name: Keep the result as an artefact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vexpath-results
+          path: |
+            vexpath-results.json
+            vexpath.sarif
+            vexpath.md
+          # Long enough to compare two weeks of scheduled runs, which is how
+          # a verdict that changed because the corpus moved becomes visible.
+          retention-days: 30
+
+      - name: Save the call-graph cache
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/vexpath
+          key: vexpath-graphs-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Say what the analysis actually did
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "needs attention: ${{ steps.vexpath.outputs.needs_attention }}"
+          echo "cleared:         ${{ steps.vexpath.outputs.cleared }}"
+          echo "reachable:       ${{ steps.vexpath.outputs.reachable }}"
+          echo "analysed:        ${{ steps.vexpath.outputs.reachability_analysed }}"
+          # A cleared count means nothing if the search never ran, so this is
+          # checked rather than assumed. It is also the assertion that would
+          # catch the Action silently losing its reachability analysis.
+          if [ '${{ steps.vexpath.outputs.reachability_analysed }}' != 'true' ]; then
+            echo "::error::reachability did not run, so nothing could be cleared"
+            exit 1
+          fi

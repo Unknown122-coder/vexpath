@@ -14,6 +14,7 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 | `vexpath attest sign FILE --type sbom\|vex` | Produce a signed in-toto statement (keyless by default; `--key` for a static key) |
 | `vexpath attest verify FILE --identity … --issuer …` | Verify a DSSE envelope against Rekor and identity constraints |
 | `vexpath policy test POLICY [--scan results.json]` | Evaluate a CEL policy against scan output without rescanning |
+| `vexpath report results.json [--format sarif\|markdown\|json] [--summary] [-o FILE]` | Re-render a scan that already ran. Nothing is re-analysed: a second analysis against a corpus that has moved on reaches different verdicts, so the SARIF a pipeline uploads would not match the table a developer read. `--summary` prints `key=value` counts for a CI step. |
 | `vexpath advisory show CVE-…` | Advisory details, affected ranges, extracted vulnerable symbols with confidence |
 | `vexpath advisory sync [--ecosystem PyPI,npm] [--dir ~/.cache/vexpath]` | Download a local advisory snapshot for offline/air-gapped use |
 | `vexpath callgraph build PATH` / `vexpath callgraph show SYMBOL` | Build/inspect graphs; used in development and support |
@@ -29,7 +30,7 @@ sync, extract, export: without the export the extracted symbols never reach the
 tool that does the reaching.
 
 Implemented today: `sbom generate|validate|lockfiles`, `scan` (through
-reachability, policy and upload), `reach`, `vex export`, `policy
+reachability, policy and upload), `report`, `reach`, `vex export`, `policy
 list|test|explain`, `attest sign|verify` (keyless signing without a Rekor
 inclusion proof), `login|whoami|logout`, `upload`, `advisory
 sync|show|coverage`, and `version`. The rest arrive with the milestone that
