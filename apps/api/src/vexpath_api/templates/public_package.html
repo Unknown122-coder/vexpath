@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{#
+  What is known about one package, from the advisory corpus.
+
+  Built entirely from the global corpus, which belongs to no tenant. That is
+  what lets this page exist with no organisation in scope, and what makes it
+  useful to somebody who has never uploaded anything: it answers "which
+  functions does this advisory actually change", which is the part nobody else
+  publishes.
+#}
+
+{% block title %}{{ name }} advisories and vulnerable symbols{% endblock %}
+{% block description %}Advisories affecting {{ name }} on {{ ecosystem }}, with the functions each fix changed.{% endblock %}
+
+{% block content %}
+<article class="package">
+  <header>
+    <h1><code>{{ name }}</code></h1>
+    <p class="muted">{{ ecosystem }}</p>
+    <dl class="facts">
+      <dt>Advisories with extracted symbols</dt><dd>{{ advisories | length }}</dd>
+      <dt>Vulnerable symbols recorded</dt><dd>{{ symbol_total }}</dd>
+    </dl>
+  </header>
+
+  <section aria-labelledby="what">
+    <h2 id="what">What this page is</h2>
+    <p>
+      An advisory tells you a package is vulnerable. It rarely tells you which
+      functions the fix changed, and that is what decides whether your own code
+      can reach the problem. These symbols are extracted by diffing each
+      advisory's fix commit, and they are what the reachability analysis
+      searches for.
+    </p>
+    <p>
+      A symbol listed here is evidence about the fix, not a claim about your
+      project. Whether any of it can run in your code depends on your call
+      graph.
+    </p>
+  </section>
+
+  {% if not advisories %}
+  <section>
+    <h2>Nothing recorded yet</h2>
+    <p>
+      No advisory affecting <code>{{ name }}</code> has had its symbols
+      extracted into this corpus. That is the ordinary state for most packages:
+      extraction is a long crawl over upstream repositories and it works
+      through the corpus over time.
+    </p>
+  </section>
+  {% else %}
+  {% for advisory in advisories %}
+  <section class="advisory" aria-labelledby="adv-{{ loop.index }}">
+    <h2 id="adv-{{ loop.index }}">
+      <a href="https://osv.dev/vulnerability/{{ advisory.id }}" rel="nofollow noopener">{{ advisory.id }}</a>
+      <span class="sev sev-{{ advisory.severity | lower }}">{{ advisory.severity }}</span>
+      {% if advisory.kev %}<span class="badge badge-kev" title="In the CISA Known Exploited Vulnerabilities catalogue">exploited</span>{% endif %}
+      {% if advisory.withdrawn_at %}<span class="badge badge-muted">withdrawn</span>{% endif %}
+    </h2>
+    {% if advisory.summary %}
+    <p>{{ advisory.summary }}</p>
+    {% endif %}
+    {% if advisory.epss_score %}
+    <p class="muted">EPSS {{ '%.3f' | format(advisory.epss_score) }} probability of exploitation in the next 30 days.</p>
+    {% endif %}
+
+    {% set symbols = symbols_by_advisory.get(advisory.id, []) %}
+    {% if symbols %}
+    <table class="symbols-table">
+      <caption class="visually-hidden">Functions the fix for {{ advisory.id }} changed</caption>
+      <thead>
+        <tr>
+          <th scope="col">Symbol</th>
+          <th scope="col">Kind</th>
+          <th scope="col">Evidence</th>
+          <th scope="col">File at the fix</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for symbol in symbols %}
+        <tr>
+          <td><code>{{ symbol.symbol }}</code></td>
+          <td>{{ symbol.kind }}</td>
+          <td>
+            {{ symbol.source }}
+            <span class="muted">{{ symbol.confidence }} confidence</span>
+          </td>
+          <td>{% if symbol.file_path %}<code>{{ symbol.file_path }}</code>{% else %}<span class="muted">not recorded</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No symbols extracted for this advisory yet.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+  {% endif %}
+</article>
+{% endblock %}

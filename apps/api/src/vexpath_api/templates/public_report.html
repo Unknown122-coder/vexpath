@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{#
+  The published report for one project.
+
+  Everything is here, in this response. No fetch, no hydration, no deferred
+  list. A report whose content arrives later cannot be read by a crawler, a
+  feed reader, a text browser, or anyone whose second request did not make it,
+  and the entire reason to publish a report is that other people can read it.
+
+  The page leads with what the reader has to act on and puts the clearances
+  below, because a clearance a consumer cannot inspect is one they cannot
+  check, and "we removed 28 of your 38 findings" is exactly the claim that
+  needs checking.
+#}
+
+{% block title %}{{ project.slug }} supply-chain report{% endblock %}
+{% block description %}Reachability-aware vulnerability report for {{ project.slug }}: which known vulnerabilities can actually run.{% endblock %}
+
+{% block content %}
+<article class="report">
+  <header class="report-header">
+    <h1>{{ project.slug }}</h1>
+    {% if project.repo_url %}
+    <p class="muted"><a href="{{ project.repo_url }}" rel="nofollow noopener">{{ project.repo_url }}</a></p>
+    {% endif %}
+
+    {% if scan %}
+    <dl class="facts">
+      <dt>Findings</dt><dd>{{ total }}</dd>
+      <dt>Need attention</dt><dd>{{ needs_attention | length }}</dd>
+      <dt>Cleared as unreachable</dt><dd>{{ cleared | length }}</dd>
+      <dt>Analysed</dt><dd><time datetime="{{ scan.finished_at or scan.created_at }}">{{ (scan.finished_at or scan.created_at).strftime('%Y-%m-%d %H:%M UTC') }}</time></dd>
+      <dt>Analyser</dt><dd>vexpath {{ scan.core_version }}</dd>
+    </dl>
+    {% else %}
+    <p>No scan has been uploaded for this project yet.</p>
+    {% endif %}
+  </header>
+
+  {% if scan %}
+  {#
+    Stated plainly rather than left for a reader to work out. An uploaded
+    result is the client's assertion until an attestation is verified against
+    a transparency log, and a report that implied otherwise would be the most
+    consequential thing on this page to get wrong.
+  #}
+  <aside class="provenance">
+    <h2>How much to trust this</h2>
+    <ul>
+      {% if reproducible %}
+      <li><strong>Reproducible.</strong> The advisory corpus is pinned to snapshot
+        <code>{{ scan.advisory_snapshot_id }}</code>, so these verdicts can be
+        re-derived and compared.</li>
+      {% else %}
+      <li><strong>Not reproducible.</strong> Advisories were read live rather than
+        from a pinned snapshot, so re-running this scan may reach different
+        conclusions.</li>
+      {% endif %}
+      {% if self_reported %}
+      <li><strong>Self-reported.</strong> The analysis ran in the project's own CI and
+        was uploaded. Nothing here has been re-verified against a transparency
+        log by this server.</li>
+      {% endif %}
+      <li>A finding is cleared only when the dependency's own code was traversed
+        and no path reached the functions its fix changed. Anything else is
+        reported, including dependencies whose source could not be read.</li>
+    </ul>
+  </aside>
+
+  <section aria-labelledby="attention">
+    <h2 id="attention">Needs attention ({{ needs_attention | length }})</h2>
+    {% if not needs_attention %}
+    <p>Nothing in this scan needs attention.</p>
+    {% else %}
+    <table class="findings">
+      <caption class="visually-hidden">Findings that need attention, worst first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Severity</th>
+          <th scope="col">Advisory</th>
+          <th scope="col">Component</th>
+          <th scope="col">Verdict</th>
+          <th scope="col">Fix</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for finding in needs_attention %}
+        <tr>
+          <td><span class="sev sev-{{ finding.severity | lower }}">{{ finding.severity }}</span></td>
+          <td>
+            <a href="https://osv.dev/vulnerability/{{ finding.advisory_id }}" rel="nofollow noopener">{{ finding.advisory_id }}</a>
+            {% if finding.kev %}<span class="badge badge-kev" title="In the CISA Known Exploited Vulnerabilities catalogue">exploited</span>{% endif %}
+          </td>
+          <td><code>{{ finding.component_name }} {{ finding.component_version }}</code>{% if not finding.direct %} <span class="muted">(transitive)</span>{% endif %}</td>
+          <td>
+            {{ finding.verdict }}
+            {% if finding.reach_status %}
+            <span class="muted">{{ finding.reach_status }}, {{ finding.reach_confidence }} confidence</span>
+            {% endif %}
+          </td>
+          <td>{% if finding.fixed_in %}<code>{{ finding.fixed_in }}</code>{% else %}<span class="muted">none published</span>{% endif %}</td>
+        </tr>
+        {% if finding.explanation %}
+        <tr class="evidence">
+          <td colspan="5">
+            <p>{{ finding.explanation }}</p>
+            {% if finding.shortest_path %}
+            <ol class="path">
+              {% for step in finding.shortest_path %}
+              <li><code>{{ step.symbol }}</code>{% if step.file %} <span class="muted">{{ step.file }}{% if step.line %}:{{ step.line }}{% endif %}</span>{% endif %}</li>
+              {% endfor %}
+            </ol>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="cleared">
+    <h2 id="cleared">Cleared as unreachable ({{ cleared | length }})</h2>
+    {% if not cleared %}
+    <p>Nothing was cleared in this scan.</p>
+    {% else %}
+    <p>
+      Each of these was matched against this project's dependencies and then
+      ruled out, because no call path from the project's entry points reaches
+      the code the advisory's fix changed. The symbols searched for are listed
+      so the conclusion can be checked.
+    </p>
+    <table class="findings">
+      <caption class="visually-hidden">Findings cleared as unreachable</caption>
+      <thead>
+        <tr>
+          <th scope="col">Advisory</th>
+          <th scope="col">Component</th>
+          <th scope="col">Searched for</th>
+          <th scope="col">Entry points</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for finding in cleared %}
+        <tr>
+          <td><a href="https://osv.dev/vulnerability/{{ finding.advisory_id }}" rel="nofollow noopener">{{ finding.advisory_id }}</a></td>
+          <td><code>{{ finding.component_name }} {{ finding.component_version }}</code></td>
+          <td>
+            {% if finding.searched_symbols %}
+            <ul class="symbols">
+              {% for symbol in finding.searched_symbols[:4] %}
+              <li><code>{{ symbol }}</code></li>
+              {% endfor %}
+              {% if finding.searched_symbols | length > 4 %}
+              <li class="muted">and {{ finding.searched_symbols | length - 4 }} more</li>
+              {% endif %}
+            </ul>
+            {% else %}
+            <span class="muted">not recorded</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if finding.entry_points %}
+            {{ finding.entry_points.count }} <span class="muted">({{ finding.entry_points.source }})</span>
+            {% else %}
+            <span class="muted">not recorded</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="badge">
+    <h2 id="badge">Badge</h2>
+    <p><img src="/badge/{{ org_slug }}/{{ project.slug }}.svg" alt="Reachable findings for {{ project.slug }}"></p>
+    <pre><code>![vexpath]({{ base_url }}/badge/{{ org_slug }}/{{ project.slug }}.svg)</code></pre>
+  </section>
+  {% endif %}
+</article>
+{% endblock %}

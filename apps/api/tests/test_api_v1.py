@@ -538,3 +538,98 @@ def test_scans_can_be_filtered_by_project(client: TestClient, keys: dict[str, st
 
     assert len(client.get("/v1/scans?project=one", headers=_headers(keys[ORG_A])).json()) == 1
     assert client.get("/v1/scans?project=two", headers=_headers(keys[ORG_A])).json() == []
+
+
+# --- Findings and their evidence ------------------------------------------
+
+
+def _uploaded(client: TestClient, secret: str, slug: str = "svc") -> str:
+    _create_project(client, secret, slug)
+    scan = client.post(
+        "/v1/scans",
+        json={"project": slug, "results": _results(findings=3)},
+        headers=_headers(secret),
+    ).json()
+    scan_id: str = scan["id"]
+    return scan_id
+
+
+def test_findings_carry_their_evidence_inline(client: TestClient, keys: dict[str, str]) -> None:
+    """A list of verdicts with no evidence is any other scanner's output.
+
+    A client that has to make a second request for the call path will render
+    the list without it.
+    """
+    scan_id = _uploaded(client, keys[ORG_A])
+    rows = client.get(f"/v1/scans/{scan_id}/findings", headers=_headers(keys[ORG_A])).json()
+
+    assert len(rows) == 3
+    first = rows[0]
+    assert first["reach"]["status"] == "reachable_confirmed"
+    assert first["reach"]["searched_symbols"] == ["lib.danger"]
+    assert first["reach"]["explanation"]
+    assert first["component"]["name"].startswith("lib")
+
+
+def test_findings_are_ordered_worst_first(client: TestClient, keys: dict[str, str]) -> None:
+    _create_project(client, keys[ORG_A], "svc")
+    document = _results(findings=2)
+    # One cleared, one reachable, uploaded in the inconvenient order.
+    document["findings"][0]["verdict"] = "affected"
+    scan = client.post(
+        "/v1/scans",
+        json={"project": "svc", "results": document},
+        headers=_headers(keys[ORG_A]),
+    ).json()
+
+    rows = client.get(f"/v1/scans/{scan['id']}/findings", headers=_headers(keys[ORG_A])).json()
+    verdicts = [row["verdict"] for row in rows]
+    # Anything needing attention sorts before anything cleared.
+    assert verdicts == sorted(verdicts, key=lambda value: 0 if value != "not_affected" else 1)
+
+
+def test_findings_can_be_filtered(client: TestClient, keys: dict[str, str]) -> None:
+    scan_id = _uploaded(client, keys[ORG_A])
+
+    affected = client.get(
+        f"/v1/scans/{scan_id}/findings?verdict=affected", headers=_headers(keys[ORG_A])
+    ).json()
+    assert all(row["verdict"] == "affected" for row in affected)
+
+    reachable = client.get(
+        f"/v1/scans/{scan_id}/findings?reachable_only=true", headers=_headers(keys[ORG_A])
+    ).json()
+    assert all(row["reach"]["status"].startswith("reachable") for row in reachable)
+
+    high = client.get(
+        f"/v1/scans/{scan_id}/findings?severity=high", headers=_headers(keys[ORG_A])
+    ).json()
+    assert all(row["severity"] == "HIGH" for row in high)
+
+
+def test_one_organisation_cannot_read_anothers_findings(
+    client: TestClient, keys: dict[str, str]
+) -> None:
+    scan_id = _uploaded(client, keys[ORG_A])
+    response = client.get(f"/v1/scans/{scan_id}/findings", headers=_headers(keys[ORG_B]))
+    assert response.status_code == 404
+    assert response.json()["detail"] == "no such scan"
+
+
+def test_one_finding_can_be_read_on_its_own(client: TestClient, keys: dict[str, str]) -> None:
+    scan_id = _uploaded(client, keys[ORG_A])
+    rows = client.get(f"/v1/scans/{scan_id}/findings", headers=_headers(keys[ORG_A])).json()
+
+    one = client.get(f"/v1/findings/{rows[0]['id']}", headers=_headers(keys[ORG_A]))
+    assert one.status_code == 200
+    assert one.json()["id"] == rows[0]["id"]
+
+
+def test_one_organisation_cannot_read_anothers_finding_by_id(
+    client: TestClient, keys: dict[str, str]
+) -> None:
+    scan_id = _uploaded(client, keys[ORG_A])
+    rows = client.get(f"/v1/scans/{scan_id}/findings", headers=_headers(keys[ORG_A])).json()
+
+    response = client.get(f"/v1/findings/{rows[0]['id']}", headers=_headers(keys[ORG_B]))
+    assert response.status_code == 404

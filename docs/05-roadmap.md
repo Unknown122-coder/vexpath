@@ -738,8 +738,59 @@ warnings-as-errors policy turned a correct refusal into a 500: the policy
 caught a bug that would otherwise have shipped as an intermittent server error
 on malformed input.
 
+### Done: findings, the public report page and the badge
+
+**The findings endpoint carries its evidence inline.** A client that has to
+make a second request for the call path will render a list without it, and a
+list of verdicts with no evidence is indistinguishable from any other
+scanner's output. One query joins the component and the reachability result,
+because two hundred findings each fetching their own evidence is two hundred
+round trips.
+
+Cleared findings are returned rather than hidden. The point of the analysis is
+a short list and the ordering puts what needs attention first, but a clearance
+a consumer cannot see is one they cannot check, and "we removed 28 of your 38
+findings" is exactly the claim that needs checking.
+
+**The public report page is complete in its first response.** No script, no
+fetch, no deferred list, asserted by inspecting the markup rather than by
+trusting the template. A report whose content arrives later cannot be read by
+a crawler, a feed reader, a text browser, or anyone whose second request did
+not make it, and the entire reason to publish a report is that other people
+can read it.
+
+The page states how much to trust it: whether the advisory corpus was pinned,
+and that an uploaded result is self-reported until something verifies it. A
+report that implied otherwise would be the most consequential thing on it to
+get wrong.
+
+**The badge is pessimistic wherever the answer is not known.** It is the most
+widely copied artefact a project publishes, seen by everyone who looks at the
+repository, so one that said "clear" on the strength of an unreproducible scan
+would mislead at the greatest possible scale. A scan with nothing reachable
+but no pinned corpus reads "none reachable (unverified)" in the cautious
+colour. The SVG is generated here rather than by redirecting to a badge
+service, because a redirect would tell that service every repository that
+embeds one and which of them are looking at a vulnerable dependency, and it
+references nothing external for the same reason.
+
+**The package page is built entirely from the global corpus**, so it needs no
+organisation in scope and is useful to somebody who has never uploaded
+anything: it answers "which functions did this advisory's fix change", which
+is the part nobody else publishes.
+
+Verified end to end on the real flask scan: 38 findings uploaded through the
+API, the report page rendering 30 KB of complete HTML with 28 clearances and
+their searched symbols, and the badge reading "10 unknown" rather than
+claiming a clean bill of health.
+
+Twenty-three tests cover it, including that a private project has no report
+page and no badge, that unpublishing withdraws both, and that a project which
+does not exist answers identically to one that is not published so nobody can
+enumerate private names.
+
 ### Remaining deliverables:
-- API (`/v1`): GitHub OAuth login, findings with evidence, suppressions, badge endpoint, public endpoints, webhooks, OpenAPI spec committed.
+- API (`/v1`): GitHub OAuth login, suppressions, webhooks, OpenAPI spec committed.
 - HTML UI in the same app (ADR-0011): dashboard (projects, scans, finding detail with server-rendered path viewer, diff between scans, policy editor, API keys), public report page, package pages, badge rendering, docs site. Jinja2 templates, HTMX attributes, Tailwind compiled by the standalone binary.
 - Row-level security, rate limiting, structured logging, tracing, Sentry.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
