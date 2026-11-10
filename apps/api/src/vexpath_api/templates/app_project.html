@@ -25,6 +25,7 @@
       {% endif %}
       {% if project.repo_url %} · {{ project.repo_url }}{% endif %}
     </p>
+    <p><a href="/app/projects/{{ project.slug }}/policy">Policy</a></p>
   </header>
 
   {% if not scans %}

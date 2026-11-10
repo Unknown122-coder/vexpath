@@ -99,13 +99,18 @@ class CompiledPolicy:
             an expression can fail a build without naming anything and a
             report that says only "failed" is not actionable.
         """
-        context = build_context(results)
-        try:
-            outcome = self._program.evaluate(context)
-        except CELEvalError as exc:
-            msg = f"policy {self.name!r} could not be evaluated: {exc}"
-            raise PolicyError(msg) from exc
+        return self.evaluate_context(raw_context(results))
 
+    def evaluate_context(self, context: dict[str, Any]) -> PolicyResult:
+        """Run this policy against a context of plain Python values.
+
+        The entry point the hosted platform uses. It keeps findings as
+        database rows rather than the uploaded document, so it assembles these
+        variables from rows; both paths then run the identical expression
+        against the identical variable names, which is the only way a policy
+        can mean the same thing in CI and on a dashboard.
+        """
+        outcome = self._run(context)
         if not isinstance(outcome, celtypes.BoolType):
             msg = (
                 f"policy {self.name!r} evaluated to {type(outcome).__name__} rather "
@@ -118,10 +123,25 @@ class CompiledPolicy:
         return PolicyResult(
             name=self.name,
             passed=not failed,
-            violations=self._violations(results) if failed else (),
+            violations=self._violations(context) if failed else (),
         )
 
-    def _violations(self, results: ScanResults) -> tuple[PolicyViolation, ...]:
+    def _run(self, context: dict[str, Any]) -> Any:
+        """Evaluate against one context, converting it on the way in.
+
+        The conversion happens here rather than in the caller so that a
+        context can be sliced -- one finding at a time, to attribute a failure
+        -- while still being ordinary Python up to this point.
+        """
+        try:
+            return self._program.evaluate(
+                {key: json_to_cel(value) for key, value in context.items()}
+            )
+        except CELEvalError as exc:
+            msg = f"policy {self.name!r} could not be evaluated: {exc}"
+            raise PolicyError(msg) from exc
+
+    def _violations(self, context: dict[str, Any]) -> tuple[PolicyViolation, ...]:
         """Which findings individually satisfy this policy.
 
         Evaluated per finding, which is an approximation: an expression can
@@ -129,21 +149,25 @@ class CompiledPolicy:
         across the whole set. When nothing matches individually, one violation
         records that honestly rather than leaving the report blank.
         """
+        entries = context.get("findings") or []
         matched: list[PolicyViolation] = []
-        for finding in results.findings:
-            single = results.model_copy(update={"findings": (finding,)})
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             try:
-                outcome = self._program.evaluate(build_context(single))
-            except CELEvalError:
+                outcome = self._run({**context, "findings": [entry]})
+            except PolicyError:
+                # One finding that cannot be evaluated must not lose the
+                # attribution of every other.
                 continue
             if isinstance(outcome, celtypes.BoolType) and bool(outcome):
                 matched.append(
                     PolicyViolation(
-                        message=_reason(finding),
+                        message=_reason(entry),
                         rule=self.name,
-                        finding_id=finding.id,
-                        advisory_id=finding.advisory.id,
-                        component=finding.component.purl,
+                        finding_id=str(entry.get("id") or ""),
+                        advisory_id=str(entry.get("advisory") or ""),
+                        component=str(entry.get("purl") or ""),
                     )
                 )
 
@@ -199,8 +223,8 @@ def evaluate(results: ScanResults, source: str = DEFAULT_PRESET) -> PolicyResult
     return compile_policy(source).evaluate(results)
 
 
-def build_context(results: ScanResults) -> dict[str, Any]:
-    """The variables a policy can read.
+def raw_context(results: ScanResults) -> dict[str, Any]:
+    """The variables a policy can read, as plain Python.
 
     Deliberately a projection of the results and nothing else: no clock, no
     environment, no filesystem. A policy that could read the time would give
@@ -208,21 +232,75 @@ def build_context(results: ScanResults) -> dict[str, Any]:
     is not one anybody can reason about.
     """
     return {
-        "findings": json_to_cel([_finding_context(finding) for finding in results.findings]),
-        "scan": json_to_cel(
-            {
-                "mode": results.mode.value,
-                "git_ref": results.project.git_ref or "",
-                "git_sha": results.project.git_sha or "",
-                "reproducible": results.is_reproducible,
-                "snapshot": results.advisory_snapshot_id or "",
-            }
-        ),
-        "project": json_to_cel({"slug": results.project.slug or ""}),
-        "counts": json_to_cel(
-            {verdict.value: count for verdict, count in results.counts_by_verdict().items()}
-        ),
+        "findings": [_finding_context(finding) for finding in results.findings],
+        "scan": {
+            "mode": results.mode.value,
+            "git_ref": results.project.git_ref or "",
+            "git_sha": results.project.git_sha or "",
+            "reproducible": results.is_reproducible,
+            "snapshot": results.advisory_snapshot_id or "",
+        },
+        "project": {"slug": results.project.slug or ""},
+        "counts": {verdict.value: count for verdict, count in results.counts_by_verdict().items()},
     }
+
+
+def build_context(results: ScanResults) -> dict[str, Any]:
+    """The same variables, converted for CEL.
+
+    Kept because it is the shape an expression actually runs against, and
+    because a caller inspecting what a policy can see should be able to look
+    at exactly that.
+    """
+    return {key: json_to_cel(value) for key, value in raw_context(results).items()}
+
+
+#: Every field a policy can read on a finding, and on ``f.reach``. Published
+#: because the hosted platform builds this same shape from database rows: a
+#: field present in one builder and absent from the other would silently
+#: change what an expression means between CI and the dashboard, and an
+#: expression that errors is a build that fails for the wrong reason. A test
+#: asserts the two agree.
+FINDING_FIELDS: tuple[str, ...] = (
+    "id",
+    "advisory",
+    "aliases",
+    "component",
+    "purl",
+    "ecosystem",
+    "version",
+    "severity",
+    "severity_rank",
+    "cvss",
+    "cvss_v4",
+    "epss",
+    "kev",
+    "verdict",
+    "justification",
+    "fixed_in",
+    "has_fix",
+    "age_days",
+    "scope",
+    "direct",
+    "suppressed",
+    "reach",
+)
+
+REACH_FIELDS: tuple[str, ...] = (
+    "analysed",
+    "status",
+    "reason",
+    "confidence",
+    "confidence_rank",
+    "reachable",
+    "path_length",
+    "via_dynamic_edges",
+)
+
+#: The top-level variables an expression can read. No clock, no environment,
+#: no filesystem: a policy that could read the time would give different
+#: answers on different days for the same scan.
+CONTEXT_VARIABLES: tuple[str, ...] = ("findings", "scan", "project", "counts")
 
 
 def _finding_context(finding: Finding) -> dict[str, Any]:
@@ -236,6 +314,9 @@ def _finding_context(finding: Finding) -> dict[str, Any]:
     """
     reach = finding.reach
     return {
+        # Present so a violation can point at the finding it came from, not
+        # for gating: an expression comparing against a ULID is a mistake.
+        "id": finding.id,
         "advisory": finding.advisory.id,
         "aliases": list(finding.advisory.aliases),
         "component": finding.component.name,
@@ -272,19 +353,25 @@ def _finding_context(finding: Finding) -> dict[str, Any]:
     }
 
 
-def _reason(finding: Finding) -> str:
-    """Why this finding failed the policy, in one line a reader can act on."""
+def _reason(entry: dict[str, Any]) -> str:
+    """Why this finding failed the policy, in one line a reader can act on.
+
+    Built from the context entry rather than from the model, so the hosted
+    platform's violations read identically to the command line's: one
+    renderer, one wording, no drift between the two places a person sees it.
+    """
+    reach = entry.get("reach") or {}
     parts = [
-        f"{finding.advisory.severity.value} {finding.advisory.id}",
-        f"in {finding.component.name} {finding.component.version}",
-        f"is {finding.verdict.value}",
+        f"{entry.get('severity', 'UNKNOWN')} {entry.get('advisory', '')}".strip(),
+        f"in {entry.get('component', '')} {entry.get('version', '')}".strip(),
+        f"is {entry.get('verdict', '')}",
     ]
-    if finding.reach is not None:
-        parts.append(f"({finding.reach.status.value}, {finding.reach.confidence.value} confidence)")
-    if finding.advisory.kev:
+    if isinstance(reach, dict) and reach.get("analysed"):
+        parts.append(f"({reach.get('status', '')}, {reach.get('confidence', '')} confidence)")
+    if entry.get("kev"):
         parts.append("and is known to be exploited in the wild")
-    if finding.fixed_in:
-        parts.append(f"- fixed in {finding.fixed_in}")
+    if entry.get("fixed_in"):
+        parts.append(f"- fixed in {entry['fixed_in']}")
     return " ".join(parts)
 
 
@@ -331,8 +418,11 @@ def needs_attention_expression() -> str:
 
 
 __all__ = [
+    "CONTEXT_VARIABLES",
     "DEFAULT_PRESET",
+    "FINDING_FIELDS",
     "PRESETS",
+    "REACH_FIELDS",
     "CompiledPolicy",
     "PolicyError",
     "build_context",
@@ -340,5 +430,6 @@ __all__ = [
     "evaluate",
     "explain",
     "needs_attention_expression",
+    "raw_context",
     "severity_at_least",
 ]

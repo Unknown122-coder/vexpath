@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{#
+  The policy editor.
+
+  A gate's mistakes are invisible in both directions: too loose and nobody
+  notices, too tight and the build everybody needs is red. So the dry run
+  against the last real scan is the main thing on this page, not a nicety.
+
+  The page also says plainly what it is not. The gate runs in CI, locally,
+  with no knowledge of this platform -- a build must not depend on a dashboard
+  being reachable. So this screen composes and tests the expression, and tells
+  you where to put it.
+#}
+
+{% block title %}Policy for {{ project.slug }}{% endblock %}
+{% block description %}Write a gate, and see what it would have done to the last scan of {{ project.slug }}.{% endblock %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <p class="muted">
+      <a href="/app">Projects</a> ·
+      <a href="/app/projects/{{ project.slug }}">{{ project.slug }}</a>
+    </p>
+    <h1>Policy</h1>
+    <p class="muted">
+      {% if stored %}
+      Version {{ stored.version }}, saved
+      <time datetime="{{ stored.created_at.isoformat() }}">{{ stored.created_at.strftime('%Y-%m-%d %H:%M') }}</time>.
+      {% else %}
+      Nothing saved yet — showing the <code>{{ default_preset }}</code> preset.
+      {% endif %}
+    </p>
+  </header>
+
+  {% if saved %}
+  <p class="notice" role="status">Saved. Put this expression in your CI configuration to use it.</p>
+  {% endif %}
+
+  {% if problem %}
+  <p class="notice notice-warn" role="alert">{{ problem }}</p>
+  {% endif %}
+
+  <section aria-labelledby="where">
+    <h2 id="where">Where this runs</h2>
+    <p>
+      The gate runs in CI, not here. <code>vexpath scan --policy</code>
+      evaluates it locally against the scan it just produced, so a build never
+      depends on this platform being reachable. This page is for composing the
+      expression and seeing what it would do before you commit it.
+    </p>
+    <pre><code>vexpath scan . --policy '{{ expression }}'</code></pre>
+    <p class="muted">
+      Or put it in <code>.vexpath.yml</code> under <code>policy:</code>. True
+      means the build <strong>fails</strong>, so a mistake tends towards a red
+      build rather than a silently green one.
+    </p>
+  </section>
+
+  {% if outcome %}
+  <section aria-labelledby="dryrun">
+    <h2 id="dryrun">Against your last scan</h2>
+    {% if not outcome.ok %}
+    <p class="notice notice-warn">
+      This expression could not be evaluated against real findings:
+      {{ outcome.error }}
+    </p>
+    <p class="muted">
+      Reported as an error rather than as a pass. A gate that failed to run
+      must never look like a gate that was satisfied.
+    </p>
+    {% elif outcome.passed %}
+    <p class="notice">
+      <strong>Would have passed</strong> the scan of
+      <a href="/app/scans/{{ scan.id }}"><time datetime="{{ scan.created_at.isoformat() }}">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</time></a>.
+    </p>
+    {% else %}
+    <p class="notice notice-warn">
+      <strong>Would have failed</strong> the scan of
+      <a href="/app/scans/{{ scan.id }}"><time datetime="{{ scan.created_at.isoformat() }}">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</time></a>,
+      blaming {{ outcome.violations | length }} finding{{ '' if outcome.violations | length == 1 else 's' }}.
+    </p>
+    {% if outcome.violations %}
+    <ul>
+      {% for violation in outcome.violations %}
+      <li>
+        {% if violation.finding_id %}
+        <a href="/app/findings/{{ violation.finding_id }}">{{ violation.message }}</a>
+        {% else %}
+        {{ violation.message }}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">
+      No single finding explains the failure — the expression failed on
+      something about the set as a whole, such as a count.
+    </p>
+    {% endif %}
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="notice">
+    <h2>Nothing to try it against</h2>
+    <p>
+      This project has no scans yet, so an expression can be checked for
+      validity but not for effect. Upload a scan and this page will say what
+      the policy would have done to it.
+    </p>
+  </section>
+  {% endif %}
+
+  <section aria-labelledby="edit">
+    <h2 id="edit">The expression</h2>
+    <form method="post" action="/app/projects/{{ project.slug }}/policy" class="stack-form wide-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <p>
+        <label for="expression">CEL expression</label>
+        <textarea id="expression" name="expression" rows="6" required
+                  maxlength="4000" spellcheck="false" autocomplete="off">{{ expression }}</textarea>
+        <span class="hint">
+          Reads <code>findings</code>, <code>scan</code>, <code>project</code>
+          and <code>counts</code>. No clock, no environment, no filesystem — so
+          CI and a laptop agree about the same scan.
+        </span>
+      </p>
+      <p>
+        {# Two buttons, one form: trying is what somebody does four or five
+           times before saving, and making them separate pages would lose the
+           expression between attempts. #}
+        <button type="submit" name="action" value="try" class="button">Try it</button>
+        <button type="submit" name="action" value="save" class="link-button">Save</button>
+      </p>
+    </form>
+  </section>
+
+  <section aria-labelledby="presets">
+    <h2 id="presets">Presets</h2>
+    <p class="muted">
+      Copy one into the box above as a starting point. Saving stores the
+      expression itself, never the name: a preset whose meaning changed in a
+      later release would otherwise silently change what this project gates
+      on.
+    </p>
+    <dl class="facts">
+      {% for preset in presets %}
+      <dt><code>{{ preset.name }}</code>{% if preset.name == default_preset %} <span class="muted">(default)</span>{% endif %}</dt>
+      <dd>
+        {{ preset.description }}
+        <br><code class="preset-expression">{{ preset.expression }}</code>
+      </dd>
+      {% endfor %}
+    </dl>
+  </section>
+
+  {% if stored %}
+  <section aria-labelledby="history">
+    <h2 id="history">Why there is a version number</h2>
+    <p class="muted">
+      Saving adds a row rather than editing one, and the audit log records the
+      expression each time. "Who loosened the gate, and when" is the question
+      that needs an answer months later.
+    </p>
+  </section>
+  {% endif %}
+</article>
+{% endblock %}

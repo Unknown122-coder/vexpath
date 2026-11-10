@@ -1164,8 +1164,47 @@ error reporting and does not is worse off than one that knows it has none.
 Twenty-three tests, including that a cyclic or absurdly nested event does not
 turn error reporting into a hang.
 
+### Done: the policy editor
+
+A gate's mistakes are invisible in both directions: too loose and nobody
+notices, too tight and the build everybody needs is red. So the editor's main
+feature is not the text box, it is the **dry run against the project's last
+real scan** — "would have failed, blaming these three findings" is the only
+thing that tells you which kind of gate you have written.
+
+**It says what it is not.** The gate runs in CI, locally, with no knowledge of
+this platform, because a build must not depend on a dashboard being reachable.
+So the page composes and tests the expression and shows the command to put it
+in. Inventing a server-side gate that silently disagreed with the one in CI
+would be worse than having none, and that is stated on the screen rather than
+left to be discovered.
+
+**An expression that will not compile is never stored.** A gate nobody can
+evaluate must not be recorded as a gate, because the next person to read the
+configuration would believe it was one. **And one that cannot be evaluated
+against real findings is reported as an error, not as a pass** — the same rule
+as the command line's exit 3: a gate that failed to run must never look like a
+gate that was satisfied.
+
+A preset is stored as its *expression*, never its name: a preset whose meaning
+changed in a later release would otherwise silently change what a project
+gates on. Saving adds a row rather than editing one and writes the expression
+to the audit log, because "who loosened the gate, and when" needs an answer
+months later — `false` is a valid policy and the loosest one there is.
+
+**The variables are the same ones CI sees.** The platform keeps findings as
+rows rather than the uploaded document, so it rebuilds the context from those
+rows; a field present in one builder and absent from the other would change
+what an expression means between the two places it runs, and an expression
+that errors is a build failing for the wrong reason. The core now publishes
+its field vocabulary and a test asserts the two agree, field for field,
+including the nested `reach` object. Nothing is ever null in either, because a
+policy comparing against null errors at evaluation time.
+
+Twenty-four tests, three of them about that parity rather than about the page.
+
 ### Remaining deliverables:
-- HTML UI in the same app (ADR-0011): the policy editor, plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the scan diff, the webhooks screen, the public report page, package pages and the badge are done.
+- HTML UI in the same app (ADR-0011): a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the scan diff, the webhooks screen, the policy editor, the public report page, package pages and the badge are done.
 - Row-level security, rate limiting, structured logging, request correlation and error reporting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 

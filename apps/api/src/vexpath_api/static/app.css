@@ -535,3 +535,31 @@ code {
   background: #7a1f1f;
   color: #fff;
 }
+
+/* A form whose field is an expression rather than a word. */
+.wide-form {
+  max-width: 100%;
+}
+
+.wide-form textarea {
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.preset-expression {
+  display: inline-block;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.4rem;
+  background: var(--code-bg);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}

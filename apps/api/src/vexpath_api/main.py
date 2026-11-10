@@ -31,6 +31,7 @@ from vexpath_api.routers import (
     login,
     me,
     pages,
+    policy_ui,
     projects,
     public,
     scans,
@@ -179,6 +180,10 @@ def create_app(
     # the cross-site request forgery problem a browser credential brings.
     app.include_router(login.router)
     app.include_router(dashboard.router)
+    # Before evidence: its project page matches a path-converted slug, which
+    # would otherwise swallow "{slug}/policy" and render a project called
+    # "svc/policy". The more specific route has to be registered first.
+    app.include_router(policy_ui.router)
     app.include_router(evidence.router)
     app.include_router(hooks_pages.router)
 
