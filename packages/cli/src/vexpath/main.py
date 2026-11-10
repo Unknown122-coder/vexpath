@@ -14,10 +14,12 @@ import typer
 from vexpath import __version__ as cli_version
 from vexpath.commands import advisory as advisory_commands
 from vexpath.commands import attest as attest_commands
+from vexpath.commands import auth as auth_commands
 from vexpath.commands import policy as policy_commands
 from vexpath.commands import reach as reach_command
 from vexpath.commands import sbom as sbom_commands
 from vexpath.commands import scan as scan_command
+from vexpath.commands import upload as upload_command
 from vexpath.commands import vex as vex_commands
 from vexpath.output import OutputFormat, emit, emit_json
 from vexpath_core import RESULTS_SCHEMA
@@ -41,8 +43,14 @@ app.add_typer(advisory_commands.app, name="advisory")
 app.add_typer(vex_commands.app, name="vex")
 app.add_typer(policy_commands.app, name="policy")
 app.add_typer(attest_commands.app, name="attest")
+# Login, whoami and logout sit at the top level rather than under a
+# group: they are typed once by a person, not scripted.
+app.command("login")(auth_commands.login)
+app.command("whoami")(auth_commands.whoami)
+app.command("logout")(auth_commands.logout)
 app.command("scan")(scan_command.command)
 app.command("reach")(reach_command.command)
+app.command("upload")(upload_command.command)
 
 
 @app.callback()

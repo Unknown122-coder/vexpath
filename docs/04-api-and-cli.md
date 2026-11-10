@@ -17,7 +17,8 @@ Installed with `pipx install vexpath` or `uv tool install vexpath`. All commands
 | `vexpath advisory show CVE-…` | Advisory details, affected ranges, extracted vulnerable symbols with confidence |
 | `vexpath advisory sync [--ecosystem PyPI,npm] [--dir ~/.cache/vexpath]` | Download a local advisory snapshot for offline/air-gapped use |
 | `vexpath callgraph build PATH` / `vexpath callgraph show SYMBOL` | Build/inspect graphs; used in development and support |
-| `vexpath login` / `vexpath whoami` | Store an API key for uploads |
+| `vexpath login` / `vexpath whoami` / `vexpath logout` | Store, check and remove the API key used for uploads. `whoami` names the source that won, because "which key am I using" is the question behind most authentication confusion. |
+| `vexpath upload results.json --project SLUG` | Send a result document produced earlier, for a pipeline that scans in one job and uploads in another |
 
 Worker commands, which a deployment schedules: `sync-advisories` downloads a
 corpus and attaches EPSS and KEV, `extract-symbols` diffs fix commits into
@@ -28,10 +29,36 @@ sync, extract, export: without the export the extracted symbols never reach the
 tool that does the reaching.
 
 Implemented today: `sbom generate|validate|lockfiles`, `scan` (through
-reachability, without policy, VEX or upload), `reach`, `advisory
+reachability, policy and upload), `reach`, `vex export`, `policy
+list|test|explain`, `attest sign|verify` (keyless signing without a Rekor
+inclusion proof), `login|whoami|logout`, `upload`, `advisory
 sync|show|coverage`, and `version`. The rest arrive with the milestone that
 needs them, and the table is the target shape rather than a claim about the
 current build.
+
+### Credentials
+
+A key is read from `$VEXPATH_API_KEY` first and from the stored file second,
+and that order is deliberate rather than incidental. CI supplies the key from a
+secret; a stale credential file on a shared build machine must not silently
+shadow it. `whoami` prints which of the two won, and `logout` says plainly when
+an exported key means you are still authenticated -- believing you have signed
+out when you have not is worse than the awkward message.
+
+The file lives at `$VEXPATH_CONFIG_DIR`, `$XDG_CONFIG_HOME/vexpath` or
+`%APPDATA%\vexpath`, is written through a temporary file whose permissions are
+restricted before any content reaches it, and is named in the output of every
+command that touches it: a credential whose location is a mystery is one nobody
+rotates. Nothing prints the secret -- not a confirmation, not an error, not a
+`repr` in a traceback. The visible prefix identifies a key and is what gets
+shown.
+
+`scan --upload --project SLUG` resolves the credential before the analysis
+starts, so a missing key costs nothing but a second, and uploads before the
+policy decides the exit code, because the scan the platform most needs is the
+one that just failed a gate. An upload that fails says the scan itself
+completed, since the exit code cannot say it and a CI log read in a hurry will
+otherwise be read as "the scan failed".
 
 `reach` exits 1 when the advisory is reachable and 0 otherwise, so a script can
 act on one advisory without parsing the report. An admitted unknown exits 0: not

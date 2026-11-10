@@ -7,6 +7,8 @@ from typing import Annotated
 
 import typer
 
+from vexpath import credentials
+from vexpath.commands import auth
 from vexpath.exit_codes import ExitCode
 from vexpath.output import OutputFormat, emit, emit_json, fail, fail_config, note
 from vexpath.sources import SNAPSHOT_ENV, advisory_source, close_source
@@ -130,6 +132,24 @@ def command(
             ),
         ),
     ] = None,
+    upload: Annotated[
+        bool,
+        typer.Option(
+            "--upload",
+            help=(
+                "Send the result to the platform after the scan. Needs a "
+                "credential from 'vexpath login' or "
+                f"${credentials.KEY_ENVIRONMENT_VARIABLE}, and --project."
+            ),
+        ),
+    ] = False,
+    project: Annotated[
+        str | None,
+        typer.Option(
+            "--project",
+            help="Slug of the project to upload to. Required with --upload.",
+        ),
+    ] = None,
     fail_on_findings: Annotated[
         bool,
         typer.Option(
@@ -154,6 +174,11 @@ def command(
             "Reachability analysis is off, so this reports matching only. No "
             "finding will be cleared."
         )
+
+    # Resolved before any analysis runs. A missing credential or a forgotten
+    # --project discovered after a four-minute scan has thrown the scan away,
+    # and the person who sees that message is already in a hurry.
+    credential = _upload_credential(upload=upload, project=project)
 
     source = advisory_source(snapshot, result_noun="scan")
     scopes = (
@@ -193,12 +218,48 @@ def command(
 
     _render(results, output_format, path, options, show_cleared=show_cleared)
 
+    if credential is not None:
+        # Uploaded before the policy decides the exit code, deliberately: the
+        # scan the platform most needs is the one that just failed a gate, and
+        # exiting first would mean the record of the failure never arrives.
+        assert project is not None  # guaranteed by _upload_credential
+        _upload(credential, project, results)
+
     if results.policy is not None and not results.policy.passed:
         raise typer.Exit(code=int(ExitCode.POLICY_FAILED))
 
     needs_attention = len(results.findings_needing_attention())
     if fail_on_findings and needs_attention:
         raise typer.Exit(code=int(ExitCode.POLICY_FAILED))
+
+
+def _upload_credential(*, upload: bool, project: str | None) -> credentials.Credential | None:
+    """The credential to upload with, or None when no upload was asked for.
+
+    Resolved up front so the two mistakes that waste a whole scan -- no
+    credential, and --upload without --project -- are reported before the
+    analysis starts rather than after it.
+    """
+    if not upload:
+        if project is not None:
+            # Saying nothing would silently discard the flag, and the person
+            # would wait for a result that never appears on the platform.
+            fail_config("--project only means something with --upload.")
+        return None
+    if not project:
+        fail_config("--upload needs --project to say where the result goes.")
+    return auth.credential_or_exit()
+
+
+def _upload(credential: credentials.Credential, project: str, results: object) -> None:
+    from vexpath_core.models.results import ScanResults
+
+    assert isinstance(results, ScanResults)
+    stored = auth.upload_results(
+        credential, project, results.model_dump(mode="json", by_alias=True)
+    )
+    scan_id = stored.get("id", "unknown")
+    note(f"uploaded to {credential.api_url} as scan {scan_id}")
 
 
 def _resolve_policy(source: str | None) -> str | None:

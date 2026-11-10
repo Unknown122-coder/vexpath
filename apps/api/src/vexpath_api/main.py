@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from vexpath_api import __version__
-from vexpath_api.routers import findings, health, pages, projects, public, scans
+from vexpath_api.routers import findings, health, me, pages, projects, public, scans
 from vexpath_api.templating import STATIC_DIR, build_templates
 from vexpath_db.engine import create_app_engine
 from vexpath_platform.eventloop import configure_event_loop
@@ -110,6 +110,7 @@ def create_app(settings: Settings | None = None, *, engine: AsyncEngine | None =
     app.include_router(projects.router)
     app.include_router(scans.router)
     app.include_router(findings.router)
+    app.include_router(me.router)
 
     # HTML UI. Registered last so its catch-all routes cannot shadow /v1.
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
