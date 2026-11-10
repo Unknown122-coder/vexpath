@@ -18,15 +18,20 @@ from sqlalchemy import create_engine, inspect
 import vexpath_db
 from vexpath_core.enums import Confidence, SymbolKind, SymbolSource, SymbolsStatus
 from vexpath_db.engine import normalise_url
-from vexpath_db.tables import GLOBAL_TABLES, metadata
+from vexpath_db.tables import GLOBAL_TABLES, TENANT_TABLE_NAMES, metadata
 
-EXPECTED_TABLES = {
+#: The global tables: the advisory corpus and the call-graph cache index.
+GLOBAL_TABLE_NAMES = {
     "advisories",
     "advisory_affected",
     "vulnerable_symbols",
     "advisory_snapshots",
     "package_callgraphs",
 }
+
+#: Everything the metadata should hold. Derived from the tenant list rather
+#: than written out again, so adding a tenant table cannot leave this behind.
+EXPECTED_TABLES = GLOBAL_TABLE_NAMES | set(TENANT_TABLE_NAMES)
 
 
 def test_metadata_creates_cleanly() -> None:

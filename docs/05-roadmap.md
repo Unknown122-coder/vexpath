@@ -624,9 +624,65 @@ Acceptance:
 - `cosign verify-attestation --type https://openvex.dev/ns/v0.2.0 --certificate-identity … --certificate-oidc-issuer …` succeeds on an attestation produced in GitHub Actions.
 - Policy presets behave as documented on the fixture results; a malformed policy exits with code 3 and a line-pointed error.
 
-## M4 · Hosted platform and public pages
+## M4 · Hosted platform and public pages — **in progress**
 
-Deliverables:
+### Done: tenant isolation
+
+One organisation reading another's dependency inventory is the worst thing
+this platform could do. An inventory names every library a company depends on
+and every version it is behind on, which is a map of where to attack them. So
+this was built before any endpoint that could leak it.
+
+Isolation is not a `WHERE` clause. A filter that has to be remembered is one
+that will be forgotten, in a new endpoint written in a hurry, and nothing will
+fail until a customer notices. Postgres enforces it on every statement,
+including the ones nobody has written yet.
+
+Three things make that real, and leaving out any one makes the rest
+decorative:
+
+1. **A policy on every tenant table**, comparing `org_id` against a session
+   setting. `current_setting` returns NULL when unset and `org_id = NULL` is
+   NULL rather than true, so a request that forgot to establish a context sees
+   nothing. Failing closed is the only acceptable direction.
+2. **`FORCE ROW LEVEL SECURITY`**, because a table's owner is exempt from its
+   own policies by default and the owner runs the migrations.
+3. **A non-privileged role.** A superuser bypasses row-level security
+   entirely, and the local development user is one. The application connects
+   with the owner's credentials and immediately switches to `vexpath_app`,
+   which is `NOLOGIN` and `NOBYPASSRLS`, so there is no second password to
+   provision or leak and nothing can connect as it directly.
+
+The context is written through `set_config` with a bound parameter, in one
+helper, because `SET` takes no parameters and building that statement by
+concatenation would turn a tenant identifier from an HTTP request into an
+injection point.
+
+**The public read path is a separate setting, not a relaxation of the first.**
+A tenant context answers "what may this organisation see"; a public context
+answers "what has been published". Entering either clears the other, so a page
+serving a public report cannot serve it with a tenant's context attached.
+Public policies exist on nine tables and on none of the others: users, API
+keys, policies and suppressions have no public policy at all. A suppression in
+particular says "we know about this and chose not to fix it", which is an
+invitation.
+
+Each public policy is an `EXISTS` up the chain to `projects` rather than a flag
+on the row. A flag would have to be kept in step on every write, and the one
+time it was not, a private project's findings would become world-readable.
+
+**The acceptance criterion, met:** 82 automated negative tests. For every one
+of the seventeen tenant tables, one organisation asks for another's rows
+directly by identifier, asks with no context at all, and tries to write a row
+carrying the other's identifier. A structural test asserts every table the
+metadata calls a tenant table has row-level security enabled, forced, and a
+policy, so a table added without protection fails the suite rather than
+quietly leaking. The audit log additionally has no `UPDATE` or `DELETE`
+privilege, because an actor who can rewrite their own audit trail has none, and
+the application cannot write to the advisory corpus at all, because an endpoint
+that could change an advisory could change a verdict.
+
+### Remaining deliverables:
 - API (`/v1`): auth (GitHub OAuth, API keys), projects, scan upload and ingest worker, findings with evidence, suppressions, audit log, badge endpoint, public endpoints, webhooks, OpenAPI spec committed.
 - HTML UI in the same app (ADR-0011): dashboard (projects, scans, finding detail with server-rendered path viewer, diff between scans, policy editor, API keys), public report page, package pages, badge rendering, docs site. Jinja2 templates, HTMX attributes, Tailwind compiled by the standalone binary.
 - Row-level security, rate limiting, structured logging, tracing, Sentry.
