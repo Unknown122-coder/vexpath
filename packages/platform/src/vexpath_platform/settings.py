@@ -135,6 +135,18 @@ class Settings(BaseSettings):
         if self.env.is_production and self.secret_key == _LOCAL_SECRET:
             msg = "VEXPATH_SECRET_KEY must be set to a real secret in production"
             raise ValueError(msg)
+        if self.env.is_production and not self.base_url.startswith("https://"):
+            # Refused at start-up rather than discovered by a user. The
+            # session cookie carries Secure in production, so a browser will
+            # not send it back over plain HTTP: sign-in would appear to work,
+            # redirect to the dashboard, and land on the sign-in page again
+            # with nothing in any log to explain it.
+            msg = (
+                "VEXPATH_BASE_URL must be an https:// URL in production: the "
+                "session cookie is Secure there, so a browser would never send "
+                "it back and signing in would silently never work"
+            )
+            raise ValueError(msg)
         return self
 
     @property

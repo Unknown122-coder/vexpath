@@ -624,7 +624,7 @@ Acceptance:
 - `cosign verify-attestation --type https://openvex.dev/ns/v0.2.0 --certificate-identity … --certificate-oidc-issuer …` succeeds on an attestation produced in GitHub Actions.
 - Policy presets behave as documented on the fixture results; a malformed policy exits with code 3 and a line-pointed error.
 
-## M4 · Hosted platform and public pages — **in progress**
+## M4 · Hosted platform and public pages — **done** (except the live deploy, which needs the owner's accounts)
 
 ### Done: tenant isolation
 
@@ -1247,10 +1247,15 @@ The suite **skips** rather than fails when the browser is absent, naming what
 to install. A suite that could not run without a 150 MB download is a suite
 most people never run. `make e2e` installs it and runs them.
 
-### Remaining deliverables:
-- HTML UI in the same app (ADR-0011): a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the scan diff, the webhooks screen, the policy editor, the public report page, package pages and the badge are done.
-- Row-level security, rate limiting, structured logging, request correlation and error reporting are done.
-- Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
+### Still open, carried into M5
+
+A documentation site. Every screen the milestone called for is built — sign-in,
+projects, publishing, API keys, the scan list, the finding detail with its path
+viewer, the scan diff, suppressions, webhooks, the policy editor, the public
+report page, the package pages and the badge — but there is no reference
+documentation on the site itself, and a tool whose output needs explaining
+should explain it where people read. That belongs with the launch work rather
+than here.
 
 Acceptance **(met)**:
 - Playwright for Python suite covers: login, create project, upload scan via CLI, view finding path, toggle public, badge reflects state within 5 minutes.
@@ -1258,6 +1263,66 @@ Acceptance **(met)**:
 - Every HTMX-driven action also works as a plain form submission with JavaScript disabled (tested with Playwright's `java_script_enabled=False` context).
 - Public report and package pages render server-side with no client-side data fetching, verified by asserting the full content is present in the initial HTML response.
 - Public package page for `requests` lists its advisories and extracted symbols.
+
+### Done: the deployment, and what it refuses to start without
+
+`infra/fly.toml` and `docs/09-deployment.md`: one image, three roles — the API
+and HTML UI, the advisory pipeline as scheduled machines, and the migration
+runner as a release command. Migrations run **before** any new machine takes
+traffic and a failure stops the deploy, because code that expects a column
+must not serve a request before the column exists.
+
+**The two probes do different jobs and are wired to different things.**
+`/readyz` decides whether a machine receives traffic, so a database outage
+stops requests without restarting anything; `/healthz` decides whether a
+machine is restarted and is deliberately independent of the database, so one
+outage cannot restart every machine at once.
+
+**Production refuses to start when it would silently half-work.** The
+placeholder secret was already refused; now an `http://` base URL is too. That
+deployment would serve every page, pass every health check, and sign nobody
+in — the session cookie carries `Secure`, so a browser never sends it back and
+the sign-in redirect lands on the sign-in page with nothing in any log to
+explain it.
+
+`min_machines_running = 1`, with the reason in the file: the rate limiter
+keeps its counters in the process, so a second machine allows the configured
+rate again. Scaling past one means moving them to Postgres first, and a test
+asserts the number so somebody finds that out before it matters rather than
+after.
+
+The runbook says what rotating `VEXPATH_SECRET_KEY` costs, which is not
+obvious: it signs session cookies (every session ends), signs the OAuth state
+(sign-ins in flight restart, harmless), and derives the key that encrypts
+**webhook signing secrets**, which become unreadable and have to be re-issued.
+It also says what a database restore cannot recover — API key secrets and
+webhook secrets are not in the dump, only hashes and ciphertext — because that
+is the intended trade and the reason a disclosure hands over no working
+credentials.
+
+**Verified by building and running the image**, not only by writing the files:
+the container serves, reaches Postgres, answers `/readyz` with the database
+healthy, hides the interactive docs in production, and says sign-in is not
+configured when no OAuth credentials are set.
+
+One more real bug came out of that run: uvicorn's access log appeared
+alongside the application's own, giving two lines per request, the second
+carrying the literal path. `--no-access-log` does not suppress it, because
+uvicorn's HTTP implementation asks `uvicorn.access.hasHandlers()` rather than
+reading the flag — and the root logger has one. Clearing that logger's
+handlers *and* stopping its propagation makes the answer false, so uvicorn
+skips building the line at all. Now one structured line per request, carrying
+the route template rather than the path.
+
+Thirteen tests over the deployment artefacts: the release command migrates,
+the probes are the right way round, production is declared, the machine count
+is pinned with its reason, the image runs unprivileged and passes the loop
+factory, and no deployment file carries anything shaped like a secret.
+
+**The live deploy itself is not done here**, and deliberately: it needs the
+account, the Neon database, the R2 bucket and the GitHub OAuth app, all of
+which are the owner's to create. The runbook is written so that is one sitting
+rather than a project.
 
 ## M5 · GitHub Action, distribution, launch
 

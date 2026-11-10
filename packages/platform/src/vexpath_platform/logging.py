@@ -77,9 +77,24 @@ def configure_logging(settings: Settings) -> None:
         level=level,
         force=True,
     )
-    for noisy in ("uvicorn.access", "uvicorn.error", "sqlalchemy.engine"):
+    for noisy in ("uvicorn.error", "sqlalchemy.engine"):
         logging.getLogger(noisy).handlers.clear()
         logging.getLogger(noisy).propagate = True
+
+    # uvicorn's access log is silenced here rather than with its
+    # ``--no-access-log`` flag, because the flag is not what uvicorn actually
+    # checks: its HTTP implementation asks ``uvicorn.access.hasHandlers()``,
+    # which is true as soon as the root logger has one. Clearing the handlers
+    # *and* stopping propagation makes that false, so uvicorn skips building
+    # the line at all.
+    #
+    # It is silenced because the application emits its own line per request,
+    # with a request id, a route template and a duration. uvicorn's carries
+    # the literal path instead, and a slug or an advisory identifier in a URL
+    # is tenant data this project keeps out of the logs.
+    access = logging.getLogger("uvicorn.access")
+    access.handlers.clear()
+    access.propagate = False
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:

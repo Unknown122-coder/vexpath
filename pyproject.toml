@@ -127,7 +127,10 @@ disallow_untyped_decorators = false
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["packages", "apps"]
+# infra/ holds the deployment configuration and the tests that check it:
+# a release command that would not migrate, or a health check pointed at the
+# wrong probe, is only visible after a deploy otherwise.
+testpaths = ["packages", "apps", "infra"]
 pythonpath = ["."]
 # importlib import mode: several packages have a tests/ directory, and the
 # default mode would collide on identically named modules.

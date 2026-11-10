@@ -1,0 +1,85 @@
+#  Fly.io deployment for the API and HTML UI.
+#
+#  One image, one process type. ADR-0011 folded the web UI into the API, so
+#  there is no second web service; the advisory pipeline runs as scheduled
+#  machines from the same image (see docs/09-deployment.md).
+#
+#  Deploy:  fly deploy -c infra/fly.toml
+#
+#  Nothing here carries a secret. Everything secret is set with `fly secrets
+#  set`, which stores it encrypted and never writes it into this file or into
+#  an image layer.
+
+app = "vexpath"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Migrations run once per deploy, before any new machine takes traffic. If
+  # this command fails the deploy stops, which is the whole point: a schema
+  # the new code expects must exist before that code serves a request, and a
+  # half-migrated database serving traffic is worse than a failed deploy.
+  release_command = "alembic -c infra/alembic.ini upgrade head"
+  # One machine at a time, so a bad release is caught by the health check
+  # before it replaces the one that works.
+  strategy = "rolling"
+
+[env]
+  VEXPATH_ENV = "production"
+  VEXPATH_LOG_FORMAT = "json"
+  VEXPATH_BASE_URL = "https://vexpath.dev"
+  # Fly terminates TLS at its edge and sets X-Forwarded-For, so the proxy
+  # headers can be believed here -- and only here. Off by default, because
+  # believing that header without a proxy in front lets a caller evade their
+  # own rate limit by varying it and exhaust somebody else's by claiming
+  # their address.
+  VEXPATH_TRUST_PROXY_HEADERS = "true"
+  VEXPATH_RATE_LIMIT_ENABLED = "true"
+  # The snapshot the scanner reads, written by the export job onto the volume.
+  VEXPATH_ADVISORY_SNAPSHOT_DIR = "/data/advisories"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # One machine stays up. The rate limiter keeps its counters in the process
+  # (documented in vexpath_platform/ratelimit.py), so every extra machine
+  # allows the configured rate again; scaling past one means moving those
+  # counters to Postgres first.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    # Readiness, not liveness: this decides whether a machine receives
+    # traffic, and it answers 503 while the database is unreachable so the
+    # edge stops sending requests without the machine being restarted.
+    grace_period = "15s"
+    interval = "15s"
+    method = "GET"
+    path = "/readyz"
+    timeout = "5s"
+
+[checks]
+  [checks.alive]
+    # Liveness, which does restart a machine. Deliberately independent of the
+    # database: a database outage must not turn into a restart loop across
+    # every machine at once.
+    type = "http"
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
+
+[[mounts]]
+  # The advisory snapshot and the call-graph cache. Both are rebuildable, so
+  # losing this volume costs time rather than data -- but a cold cache turns a
+  # twelve-second scan into a fourteen-minute one, which is worth a volume.
+  source = "vexpath_data"
+  destination = "/data"

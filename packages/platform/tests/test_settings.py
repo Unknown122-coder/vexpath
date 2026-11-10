@@ -18,15 +18,27 @@ def test_defaults_are_local_development(clean_environment: None) -> None:
 def test_production_refuses_the_placeholder_secret(clean_environment: None) -> None:
     """A deployment must not fall back to a known key."""
     with pytest.raises(ValidationError, match="must be set to a real secret"):
-        Settings(env=Environment.PRODUCTION)
+        Settings(env=Environment.PRODUCTION, base_url="https://vexpath.dev")
 
-    accepted = Settings(env=Environment.PRODUCTION, secret_key="a-real-secret-value")
+    accepted = Settings(
+        env=Environment.PRODUCTION,
+        secret_key="a-real-secret-value",
+        # Production also refuses a plain-HTTP base URL, because the session
+        # cookie is Secure there and a browser would never send it back: the
+        # deployment would serve every page and sign nobody in.
+        base_url="https://vexpath.dev",
+    )
     assert accepted.env.is_production
 
 
 def test_interactive_api_docs_are_closed_in_production(clean_environment: None) -> None:
     assert Settings(env=Environment.LOCAL).docs_url == "/docs"
-    assert Settings(env=Environment.PRODUCTION, secret_key="x" * 32).docs_url is None
+    assert (
+        Settings(
+            env=Environment.PRODUCTION, secret_key="x" * 32, base_url="https://vexpath.dev"
+        ).docs_url
+        is None
+    )
 
 
 def test_settings_come_from_prefixed_environment_variables(

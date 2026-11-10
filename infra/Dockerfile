@@ -75,5 +75,10 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
 # --loop is explicit because uvicorn builds its own event loop and ignores
 # the installed policy; on Windows its choice is one psycopg cannot use.
 # Harmless here, and it keeps one command working everywhere.
+#
+# --no-access-log because the application already logs one structured line per
+# request, with a request id, a route template and a duration. uvicorn's own
+# access log is a second, unstructured copy of the same event carrying the
+# literal path, which is tenant data this project keeps out of the logs.
 CMD ["uvicorn", "vexpath_api.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--loop", "vexpath_platform.eventloop:event_loop_factory"]
+     "--loop", "vexpath_platform.eventloop:event_loop_factory", "--no-access-log"]
