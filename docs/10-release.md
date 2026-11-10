@@ -1,17 +1,33 @@
 # 10 · Releasing
 
-Six packages, one version, one tag. They import each other's internals and
-pin each other at an exact version, so they are released together or not at
-all.
+Six packages, one version, one tag — but only **two go to PyPI**. They import
+each other's internals and pin each other at an exact version, so they are
+built and versioned together whether or not they are published.
 
 | Package | What it is | Published |
 |---|---|---|
-| `vexpath-core` | The analysis. No framework, no database, no web server. | PyPI |
-| `vexpath-platform` | Settings, logging, keys, sessions, rate limits. | PyPI |
-| `vexpath-db` | Tables and migrations. | PyPI |
-| `vexpath` | The command-line tool. **This is what people install.** | PyPI |
-| `vexpath-api` | The hosted platform and its HTML UI. | PyPI + GHCR image |
-| `vexpath-worker` | The advisory pipeline. | PyPI + GHCR image |
+| `vexpath-core` | The analysis. No framework, no database, no web server. | **PyPI** |
+| `vexpath` | The command-line tool. **This is what people install.** | **PyPI** |
+| `vexpath-platform` | Settings, logging, keys, sessions, rate limits. | GHCR image only |
+| `vexpath-db` | Tables and migrations. | GHCR image only |
+| `vexpath-api` | The hosted platform and its HTML UI. | GHCR image only |
+| `vexpath-worker` | The advisory pipeline. | GHCR image only |
+
+Only two because only two are needed: `vexpath` is the product and
+`vexpath-core` is what it depends on. The other four matter to somebody
+self-hosting from pip rather than from the container image, and there is a
+container image. Four fewer names to keep in step, and four fewer claims on
+the index.
+
+**Each published package has its own publish job and its own GitHub
+environment** (`pypi-core`, `pypi`), and that is forced rather than chosen: a
+PyPI *pending* publisher is keyed on the whole configuration — owner,
+repository, workflow filename **and environment** — so two packages claiming
+unclaimed names from one identical configuration is refused. Separate
+environments make the configurations differ, and incidentally give each
+package its own approval gate. The core publishes first, because `vexpath`
+pins it at an exact version and an installer that found one without the other
+would resolve nothing.
 
 ## Cutting a release
 
@@ -111,11 +127,15 @@ is making an argument against itself.
 
 Three things need accounts and are not done yet:
 
-1. **A PyPI project with Trusted Publishing configured** — repository,
-   workflow filename `release.yml`, environment `pypi`. There is no token to
-   create, which is the point.
-2. **The `pypi` environment** in the repository settings, ideally with a
-   required reviewer.
+1. **Two PyPI pending publishers**, both with owner `Unknown122-coder`,
+   repository `vexpath` and workflow `release.yml`, differing only in the
+   project name and environment: `vexpath` with `pypi`, and `vexpath-core`
+   with `pypi-core`. There is no token to create, which is the point.
+2. **The `pypi` and `pypi-core` environments** in the repository settings,
+   ideally each with a required reviewer. Note that environment protection
+   rules need GitHub Pro or Team on a private repository; without them the
+   environments still work, and the gate is simply that a tag has to be
+   pushed deliberately.
 3. **The Action on the Marketplace**, which needs the repository public and a
    release published. The Action itself is finished and this repository runs
    it on itself on every push.

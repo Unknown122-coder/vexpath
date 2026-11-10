@@ -106,16 +106,29 @@ jobs:
       base64-subjects: ${{ needs.build.outputs.hashes }}
       upload-assets: true
 
-  publish:
+  # Two publish jobs, one per published package, and the split is forced
+  # rather than chosen. A PyPI *pending* publisher is keyed on the whole
+  # configuration -- owner, repository, workflow filename and environment --
+  # so two packages claiming unclaimed names from one identical configuration
+  # is refused. Giving each its own environment makes the configurations
+  # differ, and incidentally gives each its own approval gate.
+  #
+  # Only two packages are published. `vexpath` is what people install and
+  # `vexpath-core` is what it depends on; the platform, database, API and
+  # worker packages matter only to somebody self-hosting from pip rather than
+  # from the container image, and we ship a container image. Fewer names is
+  # less to keep in step and less to claim.
+  #
+  # Order matters: the core goes first, because `vexpath` pins it at an exact
+  # version and an installer that found the one without the other would
+  # resolve nothing.
+  publish-core:
     needs: [build, provenance]
     if: ${{ github.ref_type == 'tag' && !inputs.dry-run }}
     runs-on: ubuntu-latest
     environment:
-      # A protected environment, so publishing can require a review. The one
-      # irreversible step in this workflow is the one worth a second pair of
-      # eyes.
-      name: pypi
-      url: https://pypi.org/project/vexpath/
+      name: pypi-core
+      url: https://pypi.org/project/vexpath-core/
     permissions:
       # For Trusted Publishing. No API token anywhere.
       id-token: write
@@ -125,16 +138,54 @@ jobs:
           name: distributions
           path: dist
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Keep only this package's files
+        # pypa/gh-action-pypi-publish takes a directory, not a list, and the
+        # build produces every workspace package. Selecting by filename
+        # prefix would also match `vexpath_core_something`, so the version is
+        # part of the pattern.
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          mv dist/vexpath_core-${{ needs.build.outputs.version }}* upload/
+          ls -1 upload
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # All six packages at once. They are released together and pin each
-          # other at an exact version, so a partial publish would leave
-          # `vexpath` unresolvable.
-          packages-dir: dist
+          packages-dir: upload
           # Fail rather than skip: a version already on PyPI means something
           # is wrong with the tag, and silently doing nothing would look like
           # a successful release.
+          skip-existing: false
+          attestations: true
+
+  publish-cli:
+    # After the core, so the dependency it pins is already resolvable.
+    needs: [build, provenance, publish-core]
+    if: ${{ github.ref_type == 'tag' && !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/vexpath/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+
+      - name: Keep only this package's files
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          # `vexpath-` with the hyphen and the version: `vexpath_core-...`
+          # does not match, and neither does any other sibling.
+          mv dist/vexpath-${{ needs.build.outputs.version }}* upload/
+          ls -1 upload
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: upload
           skip-existing: false
           attestations: true
 

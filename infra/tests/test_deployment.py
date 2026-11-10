@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -148,6 +149,105 @@ def test_no_deployment_file_carries_a_secret() -> None:
                 # password is the word "vexpath" and is meant to be known.
                 continue
             assert shape not in text, f"{path.name} looks like it holds a secret: {shape}"
+
+
+# --- The release workflow -------------------------------------------------
+
+#: The packages that go to PyPI, and the environment each publishes from.
+#: Separate environments are forced rather than chosen: a PyPI *pending*
+#: publisher is keyed on owner, repository, workflow filename **and**
+#: environment, so two packages claiming unclaimed names from one identical
+#: configuration is refused.
+PUBLISHED = {"vexpath-core": "pypi-core", "vexpath": "pypi"}
+
+
+@pytest.fixture(scope="module")
+def release() -> dict[str, Any]:
+    import yaml
+
+    document: dict[str, Any] = yaml.safe_load(
+        (INFRA.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    )
+    return document
+
+
+def test_each_published_package_has_its_own_environment(release: dict[str, Any]) -> None:
+    jobs = release["jobs"]
+    environments = {
+        job["environment"]["name"] for name, job in jobs.items() if name.startswith("publish-")
+    }
+    assert environments == set(PUBLISHED.values()), environments
+
+
+def test_the_core_publishes_before_the_command_line(release: dict[str, Any]) -> None:
+    # `vexpath` pins `vexpath-core` at an exact version, so an installer that
+    # found one without the other would resolve nothing.
+    assert "publish-core" in release["jobs"]["publish-cli"]["needs"]
+
+
+def test_each_publish_job_selects_only_its_own_files(release: dict[str, Any]) -> None:
+    """The glob must not catch a sibling.
+
+    `vexpath-<version>*` and `vexpath_core-<version>*` are mutually exclusive
+    because of the hyphen -- a prefix of just `vexpath` would also match
+    `vexpath_api`, and publishing the API package to the `vexpath` project
+    would be both wrong and irreversible.
+    """
+    scripts = {
+        name: "\n".join(step.get("run", "") for step in job["steps"])
+        for name, job in release["jobs"].items()
+        if name.startswith("publish-")
+    }
+    assert "dist/vexpath_core-${{ needs.build.outputs.version }}*" in scripts["publish-core"]
+    assert "dist/vexpath-${{ needs.build.outputs.version }}*" in scripts["publish-cli"]
+    # Proven against real filenames in tools/verify_dist.py's output; asserted
+    # here so a change to the pattern is noticed.
+    for name, script in scripts.items():
+        assert "packages-dir: dist" not in script, name
+
+
+def test_nothing_publishes_a_package_we_do_not_intend_to(release: dict[str, Any]) -> None:
+    text = (INFRA.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    # The four unpublished packages ship in the container image instead.
+    # Publishing one by accident cannot be undone.
+    for unpublished in ("vexpath_api-", "vexpath_db-", "vexpath_platform-", "vexpath_worker-"):
+        assert unpublished not in text, unpublished
+
+
+def test_a_release_refuses_a_tag_that_disagrees_with_the_version(
+    release: dict[str, Any],
+) -> None:
+    script = "\n".join(step.get("run", "") for step in release["jobs"]["build"]["steps"])
+    # A release nobody can find by version is worse than no release.
+    assert "does not match version" in script
+
+
+def test_a_release_proves_the_wheel_installs_before_publishing(
+    release: dict[str, Any],
+) -> None:
+    script = "\n".join(step.get("run", "") for step in release["jobs"]["build"]["steps"])
+    # The whole suite runs inside the workspace, so only this catches a
+    # package that imports something it does not declare.
+    assert "tools/verify_dist.py" in script
+
+
+def test_publishing_fails_on_a_version_that_already_exists(release: dict[str, Any]) -> None:
+    text = (INFRA.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    # Silently skipping would look like a successful release of something
+    # that was never uploaded.
+    assert "skip-existing: false" in text
+    assert "skip-existing: true" not in text
+
+
+def test_no_publish_job_holds_a_token(release: dict[str, Any]) -> None:
+    for name, job in release["jobs"].items():
+        if not name.startswith("publish-"):
+            continue
+        # Trusted Publishing: the job authenticates with its own OIDC
+        # identity. A long-lived token in a repository whose subject is
+        # supply-chain security would be hard to defend.
+        assert job["permissions"]["id-token"] == "write"
+        assert "secrets." not in str(job)
 
 
 # --- The image's entry point ----------------------------------------------
