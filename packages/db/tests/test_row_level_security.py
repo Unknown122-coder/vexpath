@@ -230,6 +230,25 @@ def _seed(engine: Engine, org: str, *, visibility: str) -> None:
             },
         ),
         (
+            # A webhook row holds an endpoint somebody runs and the
+            # fingerprint of a shared secret. One organisation reading
+            # another's would hand over where to send forged deliveries.
+            "INSERT INTO webhooks (id, org_id, url, secret_encrypted, "
+            "secret_fingerprint, events) "
+            "VALUES (:id, :org, :url, 'ciphertext', 'abc123', '{ping}')",
+            {"id": f"{org}-hook", "org": org, "url": f"https://example.com/{org}"},
+        ),
+        (
+            "INSERT INTO webhook_deliveries (id, org_id, webhook_id, event, status, "
+            "payload_sha256) VALUES (:id, :org, :hook, 'ping', 'delivered', :digest)",
+            {
+                "id": f"{org}-delivery",
+                "org": org,
+                "hook": f"{org}-hook",
+                "digest": "f" * 64,
+            },
+        ),
+        (
             "INSERT INTO audit_log (id, org_id, actor_type, action, metadata) "
             "VALUES (:id, :org, 'system', 'seeded', '{}')",
             {"id": f"{org}-audit", "org": org},

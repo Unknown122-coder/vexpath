@@ -251,6 +251,8 @@ TENANT_TABLE_NAMES: tuple[str, ...] = (
     "policies",
     "policy_evaluations",
     "suppressions",
+    "webhooks",
+    "webhook_deliveries",
     "audit_log",
 )
 
@@ -620,6 +622,67 @@ suppressions = Table(
     Column("revoked_at", DateTime(timezone=True), nullable=True),
     CheckConstraint("length(trim(reason)) > 0", name="ck_suppressions_reason_not_blank"),
     Index("ix_suppressions_lookup", "project_id", "advisory_id"),
+)
+
+
+webhooks = Table(
+    "webhooks",
+    metadata,
+    Column("id", String(26), primary_key=True),
+    Column("org_id", String(26), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False),
+    # Null means every project of the organisation. Narrower is the default in
+    # the API, because a webhook that silently starts covering a project
+    # created next month is a surprise rather than a convenience.
+    Column("project_id", String(26), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True),
+    Column("url", Text(), nullable=False),
+    # Encrypted, not hashed. Unlike an API key this value has to be read back:
+    # it is a shared secret used to compute the HMAC on every delivery. See
+    # vexpath_platform/secretbox.py for what that encryption does and does not
+    # defend against.
+    Column("secret_encrypted", Text(), nullable=False),
+    # A short non-reversible label, so two webhooks can be told apart in a
+    # list without the secret being shown again.
+    Column("secret_fingerprint", String(16), nullable=False),
+    Column("events", _StringArray, nullable=False, default=list),
+    Column("active", Boolean(), nullable=False, server_default="true"),
+    Column("description", Text(), nullable=True),
+    # Consecutive failures. A receiver that has been gone for days should stop
+    # being retried, and the count is what decides that.
+    Column("failure_count", Integer(), nullable=False, server_default="0"),
+    # Set when the failures crossed the threshold. Disabled rather than
+    # deleted, so somebody can see why it stopped and turn it back on.
+    Column("disabled_at", DateTime(timezone=True), nullable=True),
+    Column("last_delivery_at", DateTime(timezone=True), nullable=True),
+    Column("created_by", String(26), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Index("ix_webhooks_org", "org_id"),
+)
+
+
+webhook_deliveries = Table(
+    "webhook_deliveries",
+    metadata,
+    Column("id", String(26), primary_key=True),
+    Column("org_id", String(26), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False),
+    Column("webhook_id", String(26), ForeignKey("webhooks.id", ondelete="CASCADE"), nullable=False),
+    Column("event", String(64), nullable=False),
+    # The outcome, as one of a closed vocabulary rather than free text, so
+    # "how often does this endpoint fail" is a query and not a grep.
+    Column("status", String(16), nullable=False),
+    Column("attempts", Integer(), nullable=False, server_default="0"),
+    Column("response_status", Integer(), nullable=True),
+    # Never the payload itself: a delivery carries findings, and keeping a
+    # second copy of them in a log table doubles the places a leak can come
+    # from for no diagnostic gain.
+    Column("payload_sha256", String(64), nullable=False),
+    Column("error", Text(), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "status IN ('pending', 'delivered', 'failed', 'refused')",
+        name="ck_webhook_deliveries_status",
+    ),
+    Index("ix_webhook_deliveries_hook_created", "webhook_id", "created_at"),
 )
 
 

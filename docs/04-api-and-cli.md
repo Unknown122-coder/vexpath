@@ -247,7 +247,65 @@ silently remove the only defence.
 
 ### Webhooks (outbound)
 
-Per project: `scan.completed`, `finding.new_reachable`, `advisory.updated_affecting_project` (a newly published advisory or newly extracted symbols change a verdict for the latest scan; the platform re-evaluates reachability against stored graphs without a new scan). HMAC-SHA256 signed payloads, retries with backoff.
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/webhooks` | Never returns a secret |
+| `POST` | `/v1/webhooks` | `{url, events, project?, description?}`. Returns the signing secret **once**. |
+| `GET` | `/v1/webhooks/{id}` | |
+| `GET` | `/v1/webhooks/{id}/deliveries` | Outcome and error per attempt; never the payload |
+| `POST` | `/v1/webhooks/{id}/ping` | A test delivery, synchronously, with the result |
+| `POST` | `/v1/webhooks/{id}/rotate` | New secret, same webhook and history |
+| `POST` | `/v1/webhooks/{id}/enable` | Re-enable one disabled by repeated failure |
+| `DELETE` | `/v1/webhooks/{id}` | |
+
+Events: `ping`, `scan.completed`, `finding.new_reachable`. A webhook with no
+project covers every project of the organisation.
+`advisory.updated_affecting_project` arrives with the re-evaluation worker.
+
+**This is the one feature where a user hands the platform an address and it
+connects to it**, which makes it server-side request forgery by design. The
+constraints are therefore refusals, each closing a specific bypass:
+
+- `https` only, and only to a **public** address. Every address the hostname
+  resolves to is checked, not the first — a name resolving to one public and
+  one loopback address would otherwise pass and then connect to whichever the
+  socket picked.
+- Resolved again **on every delivery**, not once at registration. A name that
+  resolved publicly an hour ago can resolve to `127.0.0.1` now; trusting the
+  earlier answer is the DNS rebinding bypass. A narrow window remains between
+  that check and the client's own resolution, and it is documented rather than
+  assumed away.
+- Ports 443 and 8443 only. Another port is more often somebody mapping an
+  internal network than an endpoint expecting a delivery.
+- No redirects: a redirect is a second URL that nothing validated. One is
+  reported as refused, with that reason, rather than retried.
+- No credentials in the URL, and no fragment.
+- `169.254.169.254` is refused by name in the tests, because it is link-local
+  rather than private: a check that asked only `is_private` would allow the
+  cloud metadata endpoint that hands out the instance's credentials.
+
+**Signature.** `X-Vexpath-Signature: sha256=<hex>` is an HMAC-SHA256 over
+`"{timestamp}." + body`, with the timestamp in `X-Vexpath-Timestamp` and the
+delivery id in `X-Vexpath-Delivery`. Verify in constant time; a receiver using
+`==` has a timing oracle on its own secret. The timestamp is inside the
+signature so an old delivery can be refused — 300 seconds is the suggested
+window. Signing the body alone would make any captured delivery valid forever.
+The delivery id makes handling idempotent.
+
+**Retries.** Three attempts, 1s then 4s apart. Beyond that the receiver is
+down and a sender that keeps trying is a load generator aimed at somebody
+already struggling. After 20 consecutive failures the webhook is *disabled*
+rather than deleted, so somebody can see why it stopped; `enable` clears the
+count. Deliveries are sent after the response to the upload that caused them:
+a CI job must not fail because a chat integration is down.
+
+**The secret** is returned once, by create and rotate. It is stored
+*encrypted* rather than hashed — an HMAC needs it back — with a key derived
+from `VEXPATH_SECRET_KEY`. That defends a leaked backup or an open replica and
+makes no claim against an attacker holding the process. **Rotating
+`VEXPATH_SECRET_KEY` makes stored webhook secrets unreadable**; the delivery
+is then recorded as refused with "re-issue this secret", not as a receiver
+failure.
 
 ## 4. Results JSON (CLI output, upload payload)
 

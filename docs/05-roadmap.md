@@ -1020,8 +1020,68 @@ like a credential, because the one response in a key's life that carries its
 secret comes from a page that is not in this schema — if such a field ever
 appears here, something is being returned that should not be.
 
+### Done: webhooks
+
+The one feature where a user hands the platform an address and it connects to
+it, which makes it server-side request forgery by design. The whole of the
+design is therefore refusals, and each one closes a specific bypass rather
+than being a preference.
+
+`169.254.169.254` has its own test. It is link-local rather than private, so a
+check that asked only `is_private` would allow the cloud metadata endpoint
+that hands out the instance's credentials — the single most valuable address
+on the internal network and the one a naive allowlist misses. Loopback written
+as `::ffff:127.0.0.1` has its own test for the same reason.
+
+**Every address a hostname resolves to is checked, not the first.** A name
+resolving to one public and one loopback address would otherwise pass and then
+connect to whichever the socket picked. **And it is resolved again on every
+delivery**, because a name that resolved publicly an hour ago can resolve to
+`127.0.0.1` now; validating once at registration is the DNS rebinding bypass.
+A narrow window remains between that check and the HTTP client's own
+resolution, and it is written down in the module rather than left for somebody
+to assume it is not there.
+
+Redirects are refused, not followed: a redirect is a second URL that nothing
+validated, which is how all of the above would be bypassed. It is recorded as
+*refused* rather than *failed*, because "we would not connect there" and "they
+did not answer" need different fixes and a log calling both failures sends
+somebody to check their server when the problem is their address.
+
+**The signature covers a timestamp and then the body**, separated so the two
+can never run together — without a separator, timestamp 1 with body `23` and
+timestamp 12 with body `3` would share a signature. The timestamp travels as a
+header too, which is what lets a receiver refuse a replay; signing the body
+alone would make any captured delivery valid forever.
+
+**The secret is encrypted at rest rather than hashed**, because an HMAC needs
+it back. That is the one place in this system where a credential is
+recoverable, so the threat model is stated: it defends a leaked backup, a
+snapshot in the wrong bucket, an open replica, SQL injection — cases where an
+attacker holds rows and not the process. It makes no claim against an attacker
+who has the process, because that attacker has the key. Rotating
+`VEXPATH_SECRET_KEY` therefore makes stored secrets unreadable, and the
+delivery says "re-issue this secret" rather than looking like the receiver's
+fault.
+
+Three attempts, then stop: beyond a restart and a blip the receiver is down,
+and a sender that keeps trying is a load generator aimed at somebody already
+struggling. Twenty consecutive failures disables the webhook rather than
+deleting it, so somebody can see why it stopped. Deliveries go out after the
+response to the upload that caused them, because a CI job must not fail
+because a chat integration is down.
+
+The resolver and the HTTP transport are injectable, and nothing in the
+application passes either — so there is no flag that could weaken this in a
+deployment, and a test can still answer with one public and one loopback
+address, which is the bypass that matters and the one real DNS will never hand
+you on demand.
+
+127 tests: 85 on the URL rules, the signature and the secret box with no
+database, 42 through real HTTP, plus two more negative row-level security
+tests for the new tenant tables.
+
 ### Remaining deliverables:
-- API (`/v1`): webhooks.
 - HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
 - Structured logging, tracing, Sentry. Row-level security and rate limiting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.

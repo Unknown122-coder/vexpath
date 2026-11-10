@@ -33,6 +33,7 @@ from vexpath_api.routers import (
     public,
     scans,
     suppressions,
+    webhooks,
 )
 from vexpath_api.session import RedirectRequired
 from vexpath_api.templating import STATIC_DIR, build_templates
@@ -158,6 +159,7 @@ def create_app(
     app.include_router(scans.router)
     app.include_router(findings.router)
     app.include_router(suppressions.router)
+    app.include_router(webhooks.router)
     app.include_router(me.router)
 
     # Sign-in and the signed-in pages. Cookie-authenticated, and the only

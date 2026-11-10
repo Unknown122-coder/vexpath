@@ -21,12 +21,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from vexpath_api.auth import Authenticated, TenantConnection
+from vexpath_api.dependencies import get_engine, get_settings_from_app
+from vexpath_api.webhooks import dispatch
 from vexpath_core.enums import Verdict
 from vexpath_core.ids import new_ulid
 from vexpath_core.models.results import ScanResults
@@ -82,7 +84,11 @@ class ScanOut(BaseModel):
     "", response_model=ScanOut, status_code=status.HTTP_201_CREATED, summary="Upload a scan"
 )
 async def upload_scan(
-    payload: ScanUpload, connection: TenantConnection, principal: Authenticated
+    payload: ScanUpload,
+    request: Request,
+    background: BackgroundTasks,
+    connection: TenantConnection,
+    principal: Authenticated,
 ) -> ScanOut:
     """Store the result of a scan run elsewhere.
 
@@ -149,7 +155,95 @@ async def upload_scan(
         findings=len(results.findings),
         cleared=results.counts_by_verdict()[Verdict.NOT_AFFECTED],
     )
-    return await _fetch(connection, scan_id)
+
+    stored = await _fetch(connection, scan_id)
+    # Notifications go out after the response, deliberately. A delivery talks
+    # to somebody else's server over the network; doing it inside the request
+    # would make this upload's latency, and its success, depend on whether
+    # their endpoint is up. A CI job must not fail because a chat integration
+    # is down.
+    _queue_notifications(
+        request,
+        background,
+        org_id=principal.org_id,
+        project=project,
+        scan=stored,
+        results=results,
+    )
+    return stored
+
+
+def _queue_notifications(
+    request: Request,
+    background: BackgroundTasks,
+    *,
+    org_id: str,
+    project: Any,
+    scan: ScanOut,
+    results: ScanResults,
+) -> None:
+    """Schedule the webhook deliveries this upload should cause.
+
+    Two events, because they answer different questions. ``scan.completed``
+    says a scan happened and carries the counts, which is what a dashboard or
+    a chat room wants. ``finding.new_reachable`` fires only when something can
+    actually run, which is the one worth waking somebody for -- a subscriber
+    who had to filter every scan to find that out would end up ignoring both.
+    """
+    engine = get_engine(request)
+    secret_key = get_settings_from_app(request).secret_key
+    common = {
+        "project": project["slug"],
+        "scan_id": scan.id,
+        "created_at": scan.created_at.isoformat(),
+        "git_ref": scan.git_ref,
+        "git_sha": scan.git_sha,
+        # Said in the payload, not inferred by the receiver: a clearance that
+        # cannot be re-derived is an assertion, and a subscriber acting on
+        # these counts deserves to know which kind they have.
+        "reproducible": results.is_reproducible,
+    }
+
+    background.add_task(
+        dispatch,
+        engine,
+        secret_key=secret_key,
+        org_id=org_id,
+        project_id=scan.project_id,
+        event="scan.completed",
+        payload={**common, "summary": scan.summary},
+    )
+
+    reachable = [
+        finding
+        for finding in results.findings
+        if finding.reach is not None and finding.reach.status.is_reachable
+    ]
+    if reachable:
+        background.add_task(
+            dispatch,
+            engine,
+            secret_key=secret_key,
+            org_id=org_id,
+            project_id=scan.project_id,
+            event="finding.new_reachable",
+            payload={
+                **common,
+                "count": len(reachable),
+                # A bounded sample rather than everything: a notification is a
+                # pointer to the report, and a payload carrying ten thousand
+                # findings is one nobody's endpoint will accept.
+                "findings": [
+                    {
+                        "advisory_id": finding.advisory.id,
+                        "severity": finding.advisory.severity.value,
+                        "purl": finding.component.purl,
+                        "status": finding.reach.status.value if finding.reach else None,
+                    }
+                    for finding in reachable[:20]
+                ],
+            },
+        )
 
 
 async def _store(

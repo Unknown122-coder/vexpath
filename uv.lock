@@ -2626,12 +2626,14 @@ name = "vexpath-platform"
 version = "0.0.1"
 source = { editable = "packages/platform" }
 dependencies = [
+    { name = "cryptography" },
     { name = "pydantic-settings" },
     { name = "structlog" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=43.0" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "structlog", specifier = ">=24.4" },
 ]

@@ -286,6 +286,22 @@ Materialised OpenVEX statements, one per finding, plus the full document in obje
 ### `suppressions`
 Manual overrides with an expiry and a mandatory reason, scoped to project + advisory (+ optional component). Suppressions never change the *verdict*; they change the *policy outcome* and are recorded in VEX as `not_affected` with justification `inline_mitigations_already_exist` or the user-chosen label.
 
+### `webhooks`, `webhook_deliveries`
+
+`webhooks.secret_encrypted` holds ciphertext, not a hash. Every other
+credential in this schema is a SHA-256 because nothing needs it back; a
+webhook secret is a *shared* secret used to compute an HMAC on each delivery,
+so the server has to read it. Encrypted with a key derived from
+`VEXPATH_SECRET_KEY` (see `vexpath_platform/secretbox.py` for what that does
+and does not defend). `secret_fingerprint` is a short non-reversible label so
+two webhooks can be told apart without showing either secret.
+
+`webhook_deliveries` keeps the outcome and the payload's SHA-256, never the
+payload: a delivery carries findings, and a second copy of them in a log table
+doubles the places a leak can come from. `failure_count` and `disabled_at` on
+the parent are what stop a receiver that has been gone for days from being
+called forever.
+
 ### `audit_log`
 `(id, org_id, actor_type, actor_id, action, target_type, target_id, metadata jsonb, created_at)`. Append-only; no update/delete grants.
 

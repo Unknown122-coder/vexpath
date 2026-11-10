@@ -8,6 +8,9 @@ license = "Apache-2.0"
 license-files = ["../../LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
+    # A webhook signing secret has to be recoverable to sign with, so it is
+    # encrypted at rest rather than hashed (see secretbox.py).
+    "cryptography>=43.0",
     "pydantic-settings>=2.6",
     "structlog>=24.4",
 ]
