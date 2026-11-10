@@ -1,10 +1,15 @@
 """Set one version everywhere it is written.
 
-Ten places across eight files: the `version` of each of the six packages, the
-exact-version pins the dependent packages carry, and the version the GitHub
-Action installs. Doing that by hand is how a release ends up with `vexpath`
-at one version depending on a `vexpath-core` at another, which resolves to
-nothing and is only discovered by somebody installing from PyPI.
+Eleven places across nine files: the `version` of each of the six packages,
+the exact-version pins the dependent packages carry, the version the GitHub
+Action installs, and the committed OpenAPI document, which carries the API's
+version in `info.version`. Doing that by hand is how a release ends up with
+`vexpath` at one version depending on a `vexpath-core` at another, which
+resolves to nothing and is only discovered by somebody installing from PyPI.
+
+The OpenAPI document was the one that got missed, and a test caught it in the
+release pipeline rather than before the tag. It is regenerated here now,
+because "everywhere the version is written" has to mean everywhere.
 
 Tests already refuse a mismatch -- every package must share one version, every
 workspace dependency must be pinned to it, and the Action's pin must match the
@@ -16,7 +21,9 @@ place.
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -72,7 +79,35 @@ def bump(version: str) -> list[str]:
         ACTION.write_text(updated, encoding="utf-8")
         changed.append(str(ACTION.relative_to(ROOT)))
 
+    if _regenerate_openapi():
+        changed.append("apps/api/openapi.json")
+
     return changed
+
+
+def _regenerate_openapi() -> bool:
+    """Rewrite the committed OpenAPI document, which carries the version.
+
+    Run as a subprocess rather than imported, because the exporter builds an
+    application and this tool should not have to. Returns whether the file
+    changed; a failure is reported rather than swallowed, since a stale
+    document fails the release pipeline either way and the message here is
+    the clearer one.
+    """
+    exporter = ROOT / "tools" / "export_openapi.py"
+    result = subprocess.run(  # noqa: S603 - a fixed command, built here
+        [sys.executable, str(exporter)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(ROOT),
+    )
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr, file=sys.stderr)
+        msg = "the OpenAPI document could not be regenerated"
+        raise SystemExit(msg)
+    return "wrote" in result.stdout
 
 
 def verify(version: str) -> list[str]:
@@ -98,6 +133,10 @@ def verify(version: str) -> list[str]:
         problems.append("the Action pins no version")
     elif match.group(1) != version:
         problems.append(f"the Action pins {match.group(1)}")
+
+    schema = json.loads((ROOT / "apps" / "api" / "openapi.json").read_text(encoding="utf-8"))
+    if schema["info"]["version"] != version:
+        problems.append(f"the OpenAPI document says {schema['info']['version']}")
 
     return problems
 
