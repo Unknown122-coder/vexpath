@@ -602,11 +602,22 @@ the digest and predicate type required, and then shown to fail on a wrong
 predicate type, a wrong subject digest, a payload altered by one character, and
 a signature relabelled as another payload type.
 
-### Remaining deliverables:
-- `core.vex`: OpenVEX 0.2.0 and CycloneDX VEX generation with impact and action statements generated from evidence; `vexpath vex export`.
-- `core.attest`: in-toto Statement v1, DSSE, Sigstore keyless signing (`sigstore-python`), Rekor inclusion proof, verification with identity/issuer constraints; `vexpath attest sign|verify`.
-- `core.policy`: CEL evaluation with the context from `04-api-and-cli.md § 1`; presets; `vexpath policy test`.
-- SARIF output.
+### Remaining
+
+Every deliverable this milestone listed is built. What is left is the part that
+cannot be checked from a laptop:
+
+- **Rekor inclusion proofs and keyless verification.** Signing keylessly works
+  and is wired; verifying one means checking a certificate and a
+  transparency-log entry against an identity, which is what `cosign
+  verify-attestation` does and what the acceptance criterion names. Writing it
+  without being able to run it against the real log would be writing something
+  nobody has seen work.
+- **The acceptance run itself:** `cosign verify-attestation` against an
+  attestation produced by a GitHub Actions job, and `vexctl` reading the
+  OpenVEX document. Both need CI, which arrives with M5.
+
+SARIF output landed in M1 and is tested there.
 
 Acceptance:
 - Generated OpenVEX validates against the official JSON schema; `vexctl` reads it.

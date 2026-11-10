@@ -974,3 +974,56 @@ def test_inspect_describes_without_claiming_verification(
     assert payload["verified"] is False
     assert payload["predicate_type"] == "https://openvex.dev/ns/v0.2.0"
     assert "Nothing here was verified" in result.stderr
+
+
+def test_vex_export_can_write_cyclonedx(env: None, fixture_repos_dir: Path, tmp_path: Path) -> None:
+    """The other format the ecosystem reads. The choice is the consumer's."""
+    document = tmp_path / "doc.cdx.json"
+    scanned = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"],
+    )
+    results = tmp_path / "results.json"
+    results.write_text(scanned.stdout, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "vex",
+            "export",
+            "--author",
+            "Example Org",
+            "--results",
+            str(results),
+            "--format",
+            "cyclonedx",
+            "-o",
+            str(document),
+        ],
+    )
+    assert result.exit_code == 0
+    assert "official CycloneDX 1.6 schema" in result.stderr
+
+    payload = json.loads(document.read_text(encoding="utf-8"))
+    assert payload["bomFormat"] == "CycloneDX"
+    assert payload["vulnerabilities"][0]["id"] == "CVE-2024-35195"
+    # The justification vocabulary is CycloneDX's, not OpenVEX's.
+    assert payload["vulnerabilities"][0]["analysis"]["state"] == "exploitable"
+
+
+def test_vex_export_refuses_an_unknown_format(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    scanned = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"],
+    )
+    results = tmp_path / "results.json"
+    results.write_text(scanned.stdout, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["vex", "export", "--author", "A", "--results", str(results), "--format", "spdx"],
+    )
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "'openvex' or 'cyclonedx'" in result.stderr

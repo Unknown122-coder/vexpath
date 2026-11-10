@@ -13,9 +13,9 @@ from typing import Annotated
 import typer
 
 from vexpath.exit_codes import ExitCode
-from vexpath.output import emit, fail, note
+from vexpath.output import emit, fail, fail_config, note
 from vexpath.sources import advisory_source, close_source
-from vexpath_core import vex
+from vexpath_core import cdxvex, vex
 from vexpath_core.advisory.source import AdvisorySourceError
 from vexpath_core.enums import ComponentScope
 from vexpath_core.models.results import ScanResults
@@ -96,6 +96,18 @@ def export(
             help="Fetch a dependency's source from the index when it is not installed.",
         ),
     ] = False,
+    vex_format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help=(
+                "'openvex' or 'cyclonedx'. The choice is the consumer's: a "
+                "conclusion in a format their toolchain cannot load is one they "
+                "do not have."
+            ),
+        ),
+    ] = "openvex",
     document_version: Annotated[
         int,
         typer.Option(
@@ -148,23 +160,44 @@ def export(
         )
     )
 
+    if vex_format not in {"openvex", "cyclonedx"}:
+        fail_config(f"--format {vex_format!r} is not 'openvex' or 'cyclonedx'")
+
     try:
-        rendered = vex.render_json(
-            results,
-            vex.VexIdentity(author=author.strip(), product_id=product),
-            version=document_version,
-            include_under_investigation=not skip_open,
-        )
-    except vex.VexError as exc:
+        if vex_format == "cyclonedx":
+            rendered = cdxvex.render_json(
+                results, cdxvex.VexMetadata(author=author.strip(), product_id=product)
+            )
+            # Validated against the official schema before it leaves, because a
+            # document a consumer's tooling rejects is worse than none: they
+            # have to work out whether the rejection or the content is wrong.
+            cdxvex.validate(rendered)
+        else:
+            rendered = vex.render_json(
+                results,
+                vex.VexIdentity(author=author.strip(), product_id=product),
+                version=document_version,
+                include_under_investigation=not skip_open,
+            )
+    except (vex.VexError, cdxvex.CycloneDxVexError) as exc:
         fail(str(exc))
 
     document = json.loads(rendered)
-    counts = vex.statement_counts(document)
-    note(
-        f"{len(document['statements'])} statement(s): "
-        + ", ".join(f"{count} {status}" for status, count in counts.items())
-    )
-    note(f"document {document['@id']}")
+    if vex_format == "cyclonedx":
+        counts = cdxvex.state_counts(document)
+        note(
+            f"{len(document['vulnerabilities'])} vulnerability record(s): "
+            + ", ".join(f"{count} {state}" for state, count in counts.items())
+        )
+        note(f"serial {document['serialNumber']}")
+        note("validated against the official CycloneDX 1.6 schema")
+    else:
+        counts = vex.statement_counts(document)
+        note(
+            f"{len(document['statements'])} statement(s): "
+            + ", ".join(f"{count} {status}" for status, count in counts.items())
+        )
+        note(f"document {document['@id']}")
     note(f"sha256 {vex.document_sha256(rendered)}")
 
     if output is None:

@@ -4,7 +4,7 @@ An open platform that turns a Software Bill of Materials (SBOM) into an honest a
 
 It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches every component against public advisory databases, then performs **reachability analysis**: it builds a call graph of the user's code and its dependencies, extracts the exact functions that each advisory's fix commit touched, and checks whether those functions are reachable from the application's entry points. The result is published as a signed **OpenVEX** document and an **in-toto attestation**, enforced in CI by a **policy engine**, and surfaced on a hosted web platform with public report pages, per-package vulnerability pages and a README badge.
 
-> Status: **M1 complete, M2 in progress** (2026-11-09). The scanner reads
+> Status: **M1 and M2 complete, M3 built** (2026-11-10). The scanner reads
 > seven lockfile formats and both SBOM standards, matches against a
 > reproducible advisory corpus, and reports in table, JSON, Markdown and
 > SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
@@ -16,6 +16,10 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > unreachable, none of them unsoundly. Flask alone went from 38 findings to 10
 > worth looking at.** See [docs/05-roadmap.md](docs/05-roadmap.md) for the full
 > run and what limits it.
+>
+> The conclusions are publishable: `vexpath vex export` writes OpenVEX 0.2.0 or
+> CycloneDX VEX, `vexpath attest sign` wraps either in a signed in-toto
+> attestation, and `vexpath scan --policy` gates a build on them in CEL.
 
 ## Quick start
 
