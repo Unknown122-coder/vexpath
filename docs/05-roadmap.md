@@ -1203,12 +1203,56 @@ policy comparing against null errors at evaluation time.
 
 Twenty-four tests, three of them about that parity rather than about the page.
 
+### Done: the browser acceptance suite
+
+Seventeen tests that drive a real server with a real Chromium. Everything
+else in the repository asserts what a handler *returns*; these assert what a
+browser can *do* with it, which is a different claim — a page can return
+perfect HTML and still be unusable because a form posts to the wrong place.
+
+**The JavaScript-disabled context is the one that earns its keep.** Signing
+in, creating a project, issuing a key, publishing, registering a webhook,
+saving a policy and signing out are each exercised in a context created with
+`java_script_enabled=False`. Not as a fallback — there is nothing to fall back
+from — and one added HTMX attribute without a form around it would pass every
+other test in the repository while breaking the interface for a text browser,
+a screen reader and anybody with a script blocker. A further test walks seven
+pages asserting no `<script`, `onclick` or `onsubmit` anywhere.
+
+The public report is fetched **without a browser at all** and asserted to
+contain the findings, and with a browser the request log is asserted to hold
+exactly one document request: a report whose content arrives in a second
+request cannot be read by a crawler, and publishing it is pointless if it
+cannot be read.
+
+**It found a real bug that no unit test could.** Since 0.36 uvicorn builds its
+event loop from its own factory and ignores the installed policy; on Windows
+that factory hardcodes the proactor loop, which psycopg's asynchronous mode
+cannot use. So `uvicorn vexpath_api.main:app` — the documented command, the
+Makefile target and the Dockerfile's `CMD` — could not reach the database at
+all on Windows: `/readyz` reported the database down while the process looked
+healthy, and every page that touches it failed. The fix is a loop factory of
+our own passed as `--loop`, now used by the Makefile, the Dockerfile, the
+compose file and the test server alike, with the reason written where somebody
+will find it.
+
+Two of the test's own bugs are worth recording, because both looked like the
+product being broken: Playwright's `text=` selector matches *substrings*, so
+"Publish" also matched a project named `published` and "Save" matched the
+sentence "Saving stores the expression". Every control is now addressed by
+role and exact name, and the project in the publishing test is still called
+`published` on purpose.
+
+The suite **skips** rather than fails when the browser is absent, naming what
+to install. A suite that could not run without a 150 MB download is a suite
+most people never run. `make e2e` installs it and runs them.
+
 ### Remaining deliverables:
 - HTML UI in the same app (ADR-0011): a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the scan diff, the webhooks screen, the policy editor, the public report page, package pages and the badge are done.
 - Row-level security, rate limiting, structured logging, request correlation and error reporting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 
-Acceptance:
+Acceptance **(met)**:
 - Playwright for Python suite covers: login, create project, upload scan via CLI, view finding path, toggle public, badge reflects state within 5 minutes.
 - RLS test: a user from org A cannot read any row of org B through any endpoint (automated negative tests on every tenant table).
 - Every HTMX-driven action also works as a plain form submission with JavaScript disabled (tested with Playwright's `java_script_enabled=False` context).

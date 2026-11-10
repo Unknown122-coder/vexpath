@@ -72,4 +72,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
     CMD curl --fail --silent http://localhost:8000/healthz || exit 1
 
-CMD ["uvicorn", "vexpath_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --loop is explicit because uvicorn builds its own event loop and ignores
+# the installed policy; on Windows its choice is one psycopg cannot use.
+# Harmless here, and it keeps one command working everywhere.
+CMD ["uvicorn", "vexpath_api.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--loop", "vexpath_platform.eventloop:event_loop_factory"]

@@ -28,6 +28,12 @@ type: ## Type-check (strict on the analysis core)
 test: ## Run unit tests (no Postgres needed)
 	$(UV) run pytest -m "not integration and not network and not benchmark"
 
+e2e: ## Run the browser acceptance suite (needs `make up` and a browser)
+	$(UV) run playwright install chromium
+# -m e2e overrides the default deselection: this suite has to run alone,
+# because Playwright and psycopg need different event loops.
+	$(UV) run pytest -m e2e apps/api/tests/e2e -v
+
 test-all: ## Run every test including integration (needs `make up`)
 	$(UV) run pytest -m "not network and not benchmark"
 
@@ -63,7 +69,10 @@ seed-advisories: ## Load the frozen test advisory snapshot into the local databa
 	$(UV) run python -m vexpath_worker.main seed-advisories testdata/advisories
 
 api: ## Run the API and HTML UI with reload, outside Docker
-	$(UV) run uvicorn vexpath_api.main:app --reload --port 8000
+# --loop is not optional on Windows: uvicorn builds its own event loop and
+# would pick the proactor one, which psycopg's async mode cannot use at all
+# (see packages/platform/src/vexpath_platform/eventloop.py).
+	$(UV) run uvicorn vexpath_api.main:app --reload --port 8000 --loop vexpath_platform.eventloop:event_loop_factory
 
 worker: ## Show the worker's available jobs
 	$(UV) run python -m vexpath_worker.main --help

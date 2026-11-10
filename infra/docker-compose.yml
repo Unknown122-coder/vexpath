@@ -76,6 +76,9 @@ services:
       - /app/apps/api/src
       - --reload-dir
       - /app/packages
+      # uvicorn builds its own event loop and ignores the installed policy.
+      - --loop
+      - vexpath_platform.eventloop:event_loop_factory
 
   # Loads the frozen advisory snapshot, then exits. The worker gains a
   # long-running queue consumer in M1, when there is a scheduled job to consume.

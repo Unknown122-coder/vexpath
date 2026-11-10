@@ -48,6 +48,7 @@ dev = [
     "httpx>=0.28",
     "httpx2>=0.29",
     "types-pyyaml>=6.0",
+    "playwright>=1.65.0",
 ]
 
 # ---------------------------------------------------------------------------
@@ -130,7 +131,13 @@ testpaths = ["packages", "apps"]
 pythonpath = ["."]
 # importlib import mode: several packages have a tests/ directory, and the
 # default mode would collide on identically named modules.
-addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+# The browser acceptance suite is deselected here and run on its own by
+# `make e2e`. That is not tidiness: Playwright drives its browser through a
+# subprocess, which needs the proactor event loop on Windows, and psycopg's
+# asynchronous mode needs the selector one. The policy is process-wide, so a
+# run that mixed them would leave whichever came second unable to work --
+# which it did, as 387 errors in one run and none in either suite alone.
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib -m 'not e2e'"
 asyncio_mode = "auto"
 # Pin the fixture loop scope rather than inherit a default that pytest-asyncio
 # is in the middle of changing.
@@ -139,6 +146,7 @@ markers = [
     "integration: needs Postgres and MinIO (docker compose up)",
     "network: reaches the public internet; skipped by default in CI",
     "benchmark: the reachability benchmark set; slow",
+    "e2e: drives a real browser; must run in its own process (see addopts)",
 ]
 filterwarnings = ["error"]
 

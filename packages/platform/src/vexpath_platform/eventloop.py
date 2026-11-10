@@ -10,19 +10,60 @@ first request, and so would a Windows container. Fixing it in one place that
 both the process entry point and the tests call is what stops it being
 rediscovered.
 
-Called at process start, never from ``create_app``: replacing the global event
-loop policy is a process-wide decision, and a library function that did it as a
-side effect would surprise anything else running in the same interpreter.
+**Setting the policy is not enough under uvicorn, and that cost a real
+afternoon.** Since 0.36 uvicorn builds its loop from its own factory and
+ignores the installed policy; on Windows that factory hardcodes the proactor
+loop. So ``uvicorn vexpath_api.main:app`` cannot reach the database on Windows
+however the policy is set — every query answers with an interface error and
+``/readyz`` reports the database down while the process looks healthy. The
+remedy is to hand uvicorn a factory of our own:
+
+    uvicorn vexpath_api.main:app --loop vexpath_platform.eventloop:event_loop_factory
+
+That flag is in the Makefile, the Dockerfile and the compose file, and
+``UVICORN_LOOP_FACTORY`` below is the string to use so none of them can drift
+from the others. It is harmless everywhere else: off Windows this returns the
+same loop asyncio would have chosen.
+
+``configure_event_loop`` remains the right call for anything that runs
+``asyncio.run`` itself — the worker, and the tests.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+
+#: What to pass to ``uvicorn --loop``. One string, so the Makefile, the
+#: Dockerfile and the compose file cannot disagree about it.
+UVICORN_LOOP_FACTORY = "vexpath_platform.eventloop:event_loop_factory"
+
+
+def event_loop_factory() -> asyncio.AbstractEventLoop:
+    """A new event loop the database driver can use.
+
+    Shaped for ``uvicorn --loop <import string>``, which expects a zero-argument
+    callable returning a loop. On Windows that is deliberately *not* the
+    proactor loop uvicorn would otherwise pick; everywhere else it is the
+    ordinary one.
+    """
+    # ``os.name`` rather than ``sys.platform``: a type checker special-cases
+    # the latter, narrows it to whichever platform the check is running on,
+    # and then calls the other branch dead code -- which is exactly the branch
+    # that matters on the other platform.
+    if os.name == "nt":
+        return asyncio.SelectorEventLoop()
+    return asyncio.new_event_loop()
 
 
 def configure_event_loop() -> bool:
     """Install an event loop policy the database driver can use.
+
+    For code that creates its own loop through ``asyncio.run`` or
+    ``asyncio.get_event_loop``: the worker, the command line, and the tests.
+    It does **not** affect uvicorn, which builds its own loop — see the module
+    docstring and ``UVICORN_LOOP_FACTORY``.
 
     Returns:
         True when the policy was changed, which is only ever on Windows. The
@@ -43,4 +84,4 @@ def configure_event_loop() -> bool:
     return True
 
 
-__all__ = ["configure_event_loop"]
+__all__ = ["UVICORN_LOOP_FACTORY", "configure_event_loop", "event_loop_factory"]
