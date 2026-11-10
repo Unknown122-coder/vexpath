@@ -86,6 +86,59 @@ def build() -> list[Path]:
     return wheels
 
 
+def inspect_archives() -> None:
+    """Refuse an archive whose members escape its own root.
+
+    Every package once carried ``license-files = ["../../LICENSE"]``, which
+    put ``<name>-<version>/../../LICENSE`` into each source archive: a tar
+    member pointing outside the directory it unpacks into, which is the
+    path-traversal shape that archive extractors are supposed to refuse. One
+    version of uv read it happily and a newer one refused, so the local build
+    passed while the release pipeline failed -- and the archive was malformed
+    either way.
+
+    Checked here, by reading the files, so the answer does not depend on which
+    builder or installer happens to be present.
+    """
+    import tarfile
+    import zipfile
+
+    problems: list[str] = []
+
+    for archive in sorted(DIST.glob("*.tar.gz")):
+        with tarfile.open(archive) as handle:
+            names = handle.getnames()
+        root = archive.name[: -len(".tar.gz")]
+        for name in names:
+            if ".." in Path(name).parts or Path(name).is_absolute():
+                problems.append(f"{archive.name}: member escapes its root: {name}")
+        if not any(Path(name).name == "LICENSE" for name in names):
+            # Apache 2.0 asks that the licence travel with the source.
+            problems.append(f"{archive.name}: carries no LICENSE")
+        if not any(name.startswith(f"{root}/") for name in names):
+            problems.append(f"{archive.name}: nothing under {root}/")
+
+    for archive in sorted(DIST.glob("*.whl")):
+        with zipfile.ZipFile(archive) as handle:
+            names = handle.namelist()
+        for name in names:
+            if ".." in Path(name).parts or Path(name).is_absolute():
+                problems.append(f"{archive.name}: member escapes its root: {name}")
+        if not any(name.endswith("LICENSE") for name in names):
+            problems.append(f"{archive.name}: carries no LICENSE")
+
+    if problems:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        msg = "the distributions are malformed"
+        raise SystemExit(msg)
+
+    print(
+        f"inspected {len(sorted(DIST.glob('*.tar.gz')))} source archives and "
+        f"{len(sorted(DIST.glob('*.whl')))} wheels: no escaping members, every one carries its licence"
+    )
+
+
 def verify(wheels: list[Path]) -> None:
     command_line = next((w for w in wheels if w.name.startswith("vexpath-")), None)
     if command_line is None:
@@ -148,7 +201,11 @@ def _console_script(environment: Path) -> Path:
 
 
 def main() -> int:
-    verify(build())
+    wheels = build()
+    # Before installing anything: a malformed archive is a defect in what
+    # would be published, whether or not this machine's installer objects.
+    inspect_archives()
+    verify(wheels)
     return 0
 
 

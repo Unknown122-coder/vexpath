@@ -171,13 +171,27 @@ def test_every_package_shares_one_version(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", sorted(PACKAGES))
-def test_every_package_is_apache_licensed_with_the_root_licence(name: str) -> None:
+def test_every_package_is_apache_licensed(name: str) -> None:
     project = _manifest(PACKAGES[name])["project"]
     assert isinstance(project, dict)
     assert project["license"] == "Apache-2.0"
-    # One LICENSE file at the root, referenced by each package, so a wheel
-    # carries the licence it claims.
-    assert project["license-files"]
+    assert project["license-files"] == ["LICENSE"]
+
+
+@pytest.mark.parametrize("name", sorted(PACKAGES))
+def test_every_package_carries_an_identical_copy_of_the_licence(name: str) -> None:
+    """Each package has its own LICENSE, byte-identical to the root's.
+
+    A copy rather than a reference, because ``license-files =
+    ["../../LICENSE"]`` put a member escaping the archive root into every
+    source distribution -- the path-traversal shape extractors refuse. A copy
+    can drift, so this is the guard: if the root licence ever changes, copy it
+    outward again.
+    """
+    root = (ROOT / "LICENSE").read_bytes()
+    theirs = PACKAGES[name] / "LICENSE"
+    assert theirs.is_file(), f"{name} has no LICENSE; copy the root one into it"
+    assert theirs.read_bytes() == root, f"{name}'s LICENSE differs from the root one"
 
 
 @pytest.mark.parametrize("name", sorted(PACKAGES))

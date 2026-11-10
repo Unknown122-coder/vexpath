@@ -5,7 +5,12 @@ description = "Shared platform concerns: configuration, structured logging and o
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-license-files = ["../../LICENSE"]
+# A copy, not a reference to the root. A parent-directory path lands in
+# the source archive as `<name>-<version>/../../LICENSE`, which is a tar
+# member escaping its own root: newer uv refuses to read it outright, and
+# the archive was malformed regardless of which builder tolerated it. A
+# test asserts every copy is byte-identical to the root LICENSE.
+license-files = ["LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
     # For the API key *format* only (vexpath_core.keyformat), which lives in
