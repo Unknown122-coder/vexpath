@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{#
+  One project and its scans.
+
+  The reproducibility column is not decoration. A scan with no pinned advisory
+  snapshot cannot have its verdicts re-derived, which makes every clearance in
+  it an assertion rather than a finding, and the table says which kind each
+  scan is rather than letting them look alike.
+#}
+
+{% block title %}{{ project.slug }}{% endblock %}
+{% block description %}Scans of {{ project.slug }} and what each found.{% endblock %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <p class="muted"><a href="/app">Projects</a></p>
+    <h1><code>{{ project.slug }}</code></h1>
+    <p class="muted">
+      {% if project.visibility == 'public' %}
+      published at <a href="/p/{{ session.org_slug }}/{{ project.slug }}">/p/{{ session.org_slug }}/{{ project.slug }}</a>
+      {% else %}
+      private
+      {% endif %}
+      {% if project.repo_url %} · {{ project.repo_url }}{% endif %}
+    </p>
+  </header>
+
+  {% if not scans %}
+  <section class="notice">
+    <h2>No scans yet</h2>
+    <p>Upload one from the command line:</p>
+    <pre><code>vexpath scan . --upload --project {{ project.slug }}</code></pre>
+    <p class="muted">
+      The scan runs where your code is. Nothing is uploaded except the result.
+    </p>
+  </section>
+  {% else %}
+  <table class="data-table">
+    <caption class="visually-hidden">Scans of {{ project.slug }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">When</th>
+        <th scope="col">Ref</th>
+        <th scope="col">Needs attention</th>
+        <th scope="col">Cleared</th>
+        <th scope="col">Findings</th>
+        <th scope="col">Reproducible</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for scan in scans %}
+      <tr>
+        <th scope="row">
+          <a href="/app/scans/{{ scan.id }}">
+            <time datetime="{{ scan.created_at.isoformat() }}">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+          </a>
+          <span class="muted">{{ scan.mode }}</span>
+        </th>
+        <td>
+          {% if scan.git_ref %}{{ scan.git_ref }}{% else %}<span class="muted">—</span>{% endif %}
+          {% if scan.git_sha %}<span class="muted"><code>{{ scan.git_sha[:8] }}</code></span>{% endif %}
+        </td>
+        <td>{{ scan.summary.get('needs_attention', '—') }}</td>
+        <td>{{ scan.summary.get('cleared', '—') }}</td>
+        <td>{{ scan.finding_count }}</td>
+        <td>
+          {% if scan.advisory_snapshot_id %}
+          <span title="The advisory corpus was pinned, so these verdicts can be re-derived">yes</span>
+          {% else %}
+          {# Stated, not omitted: an unreproducible clearance is a claim. #}
+          <span class="muted" title="No pinned advisory corpus, so the verdicts cannot be re-derived">no</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</article>
+{% endblock %}

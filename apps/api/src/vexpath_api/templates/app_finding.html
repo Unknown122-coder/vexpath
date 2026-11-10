@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{#
+  One finding, with the evidence for its verdict.
+
+  This is the page a developer opens when they disagree with the tool, so it is
+  built to survive that: it shows what was searched for, where the search
+  started, how good the call graph was, and the path itself when there is one.
+
+  The path is an ordered list rendered server-side. A viewer that drew it with
+  script would be invisible to a crawler, to a text browser and to anybody
+  reading a saved copy, and the entire value of evidence is that it travels.
+
+  Three things are never collapsed into each other on this page: a proven path,
+  a path that depends on a conservatively resolved call, and no analysis at all.
+  They mean different things and the third is not a clearance.
+#}
+
+{% block title %}{{ finding.advisory_id }} in {{ finding.component_name }}{% endblock %}
+{% block description %}Why {{ finding.advisory_id }} was {{ finding.verdict }} for {{ finding.component_name }}@{{ finding.component_version }}.{% endblock %}
+
+{% block content %}
+<article class="app finding">
+  <header class="app-header">
+    <p class="muted">
+      <a href="/app">Projects</a> ·
+      <a href="/app/projects/{{ project.slug }}">{{ project.slug }}</a> ·
+      <a href="/app/scans/{{ finding.scan_id }}">scan</a>
+    </p>
+    <h1>
+      <a href="https://osv.dev/vulnerability/{{ finding.advisory_id }}" rel="nofollow noopener">{{ finding.advisory_id }}</a>
+      <span class="sev sev-{{ finding.severity | lower }}">{{ finding.severity }}</span>
+      {% if finding.kev %}<span class="badge badge-kev" title="In the CISA Known Exploited Vulnerabilities catalogue">exploited in the wild</span>{% endif %}
+    </h1>
+    <p class="muted">
+      in <code>{{ finding.component_name }}@{{ finding.component_version }}</code>
+      ({{ 'direct' if finding.direct else 'transitive' }} {{ finding.scope }} dependency)
+    </p>
+  </header>
+
+  <section aria-labelledby="verdict">
+    <h2 id="verdict">Verdict</h2>
+    <dl class="facts">
+      <dt>Verdict</dt>
+      <dd>{{ finding.verdict }}</dd>
+      {% if finding.justification %}
+      <dt>Justification</dt>
+      <dd><code>{{ finding.justification }}</code></dd>
+      {% endif %}
+      {% if finding.fixed_in %}
+      <dt>Fixed in</dt>
+      <dd>{{ finding.fixed_in }}</dd>
+      {% endif %}
+      {% if finding.cvss_v3_score %}
+      <dt>CVSS</dt>
+      <dd>{{ '%.1f' | format(finding.cvss_v3_score) }}</dd>
+      {% endif %}
+      {% if finding.epss_score %}
+      <dt>EPSS</dt>
+      <dd>{{ '%.3f' | format(finding.epss_score) }} probability of exploitation in the next 30 days</dd>
+      {% endif %}
+      <dt>Component</dt>
+      <dd><code>{{ finding.purl }}</code></dd>
+      <dt>Advisory corpus</dt>
+      <dd>
+        {% if finding.advisory_snapshot_id %}
+        <code>{{ finding.advisory_snapshot_id }}</code> — this verdict can be re-derived
+        {% else %}
+        not pinned — this verdict cannot be re-derived
+        {% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  {% if not analysed %}
+  <section class="notice notice-warn" aria-labelledby="none">
+    <h2 id="none">Nobody looked</h2>
+    <p>
+      No reachability analysis was recorded for this finding, so there is no
+      evidence here either way. That is not the same as "not reachable": it
+      means the question was not asked, usually because the scan ran with
+      <code>--no-reach</code> or the dependency's source was not readable on
+      disk.
+    </p>
+    <p>
+      To get an answer, run the scan with the dependencies installed, or pass
+      <code>--download-missing</code> so their source can be fetched.
+    </p>
+  </section>
+  {% else %}
+  <section aria-labelledby="reach">
+    <h2 id="reach">Reachability</h2>
+    <dl class="facts">
+      <dt>Status</dt>
+      <dd>{{ reach.status }}{% if reach.reason %} <span class="muted">({{ reach.reason }})</span>{% endif %}</dd>
+      <dt>Confidence</dt>
+      <dd>{{ reach.confidence }}</dd>
+      {% if reach.path_count %}
+      <dt>Paths found</dt>
+      <dd>{{ reach.path_count }}{% if reach.via_dynamic_edges %} — every one of them depends on a call resolved conservatively{% endif %}</dd>
+      {% endif %}
+    </dl>
+    {% if reach.explanation %}
+    <p>{{ reach.explanation }}</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="searched">
+    <h2 id="searched">What was searched for</h2>
+    <p class="muted">
+      The functions the advisory's fix changed. A verdict of "not reachable"
+      means none of these could run — so it is worth nothing unless you can see
+      which ones were looked for.
+    </p>
+    {% if reach.searched_symbols %}
+    <ul class="symbol-list">
+      {% for symbol in reach.searched_symbols %}
+      <li>
+        <code>{{ symbol }}</code>
+        {% if symbol in (reach.matched_symbols or []) %}
+        <span class="badge badge-kev">reached</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="notice notice-warn">
+      No symbols were available for this advisory, so reachability could not
+      narrow anything down. The finding stands on the version match alone.
+    </p>
+    {% endif %}
+  </section>
+
+  {% if path %}
+  <section aria-labelledby="path">
+    <h2 id="path">The call path</h2>
+    <p class="muted">
+      The shortest path found from an entry point to the vulnerable code. Each
+      step is a call; the file and line are where it is made.
+    </p>
+    <ol class="call-path">
+      {% for step in path %}
+      <li{% if step.conservative %} class="conservative"{% endif %}>
+        <code class="symbol">{{ step.symbol }}</code>
+        {% if step.file %}
+        <span class="muted">{{ step.file }}{% if step.line %}:{{ step.line }}{% endif %}</span>
+        {% endif %}
+        {% if step.conservative %}
+        {# One such hop is the difference between a proven path and a guess. #}
+        <span class="badge badge-muted" title="This call could not be resolved exactly, so the edge was assumed">{{ step.edge_kind }} call</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endif %}
+
+  {% if reach.entry_points %}
+  <section aria-labelledby="entries">
+    <h2 id="entries">Where the search started</h2>
+    <p class="muted">
+      Reachability is relative to the entry points. A finding reachable only
+      from a maintenance script is a different problem from one reachable from
+      a request handler, so these are named rather than summarised.
+    </p>
+    <dl class="facts">
+      <dt>Source</dt>
+      <dd>{{ reach.entry_points.get('source', 'unknown') }}</dd>
+      <dt>Count</dt>
+      <dd>{{ reach.entry_points.get('count', 0) }}</dd>
+    </dl>
+    {% set items = reach.entry_points.get('items') or [] %}
+    {% if items %}
+    <ul class="symbol-list">
+      {% for item in items %}
+      <li><code>{{ item }}</code></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if reach.graph_stats %}
+  <section aria-labelledby="graph">
+    <h2 id="graph">The graph this rests on</h2>
+    <p class="muted">
+      Published so the verdict can be judged rather than trusted. A high
+      unresolved-call ratio means the graph could not see much, and a clearance
+      from such a graph deserves less weight.
+    </p>
+    <dl class="facts">
+      <dt>First-party nodes</dt><dd>{{ reach.graph_stats.get('first_party_nodes', 0) }}</dd>
+      <dt>First-party edges</dt><dd>{{ reach.graph_stats.get('first_party_edges', 0) }}</dd>
+      <dt>Linked packages</dt><dd>{{ reach.graph_stats.get('linked_packages', 0) }}</dd>
+      <dt>Unresolved calls</dt>
+      <dd>{{ '%.1f' | format(100 * (reach.graph_stats.get('unresolved_call_ratio') or 0)) }}%</dd>
+      <dt>Files that would not parse</dt>
+      <dd>{{ reach.graph_stats.get('parse_error_files', 0) }}</dd>
+    </dl>
+  </section>
+  {% endif %}
+  {% endif %}
+</article>
+{% endblock %}

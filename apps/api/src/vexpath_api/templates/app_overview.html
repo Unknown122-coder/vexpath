@@ -53,14 +53,14 @@ vexpath scan . --upload --project my-service</code></pre>
       {% set latest = project.latest %}
       <tr>
         <th scope="row">
-          <code>{{ project.slug }}</code>
+          <a href="/app/projects/{{ project.slug }}"><code>{{ project.slug }}</code></a>
           {% if project.repo_url %}
           <span class="muted">{{ project.repo_url }}</span>
           {% endif %}
         </th>
         <td>
           {% if latest %}
-          <time datetime="{{ latest.created_at.isoformat() }}">{{ latest.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+          <a href="/app/scans/{{ latest.id }}"><time datetime="{{ latest.created_at.isoformat() }}">{{ latest.created_at.strftime('%Y-%m-%d %H:%M') }}</time></a>
           {% if latest.git_ref %}<span class="muted">{{ latest.git_ref }}</span>{% endif %}
           {% else %}
           <span class="muted">never</span>

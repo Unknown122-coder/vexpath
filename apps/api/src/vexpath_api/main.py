@@ -23,6 +23,7 @@ from vexpath_api import __version__
 from vexpath_api.oauth import IdentityProvider
 from vexpath_api.routers import (
     dashboard,
+    evidence,
     findings,
     health,
     login,
@@ -153,6 +154,7 @@ def create_app(
     # the cross-site request forgery problem a browser credential brings.
     app.include_router(login.router)
     app.include_router(dashboard.router)
+    app.include_router(evidence.router)
 
     # HTML UI. Registered last so its catch-all routes cannot shadow /v1.
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -392,3 +392,146 @@ code {
   gap: 1rem;
   align-items: baseline;
 }
+
+/* --- The call path -------------------------------------------------------
+ *
+ * The one piece of this interface that is genuinely a visualisation, and it is
+ * an ordered list. Rendered server-side, so it survives being saved, printed,
+ * read in a text browser, or fetched by something that runs no script.
+ */
+
+.call-path {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  counter-reset: hop;
+}
+
+.call-path li {
+  position: relative;
+  padding: 0.5rem 0 0.5rem 2.2rem;
+  border-left: 2px solid var(--border);
+  margin-left: 0.6rem;
+}
+
+.call-path li::before {
+  counter-increment: hop;
+  content: counter(hop);
+  position: absolute;
+  left: -0.75rem;
+  top: 0.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.3rem;
+  text-align: center;
+}
+
+/* A hop whose call could not be resolved exactly. Marked, because one of
+ * these is the difference between a proven path and a conservative guess. */
+.call-path li.conservative {
+  border-left-style: dashed;
+}
+
+.call-path .symbol {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.call-path .muted {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.symbol-list {
+  margin: 0 0 1.5rem;
+  padding-left: 1.2rem;
+  columns: 2 24ch;
+}
+
+.symbol-list li {
+  break-inside: avoid;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(10rem, auto) 1fr;
+  gap: 0.35rem 1.2rem;
+  margin: 0 0 1.5rem;
+}
+
+.facts dt {
+  color: var(--text-muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.finding h2 {
+  margin-top: 2.5rem;
+}
+
+/* --- Severity, and the things only a screen reader should get -------------
+ *
+ * Severity is shown as a word with a colour behind it, never as a colour
+ * alone: a reader with any form of colour blindness must get the same
+ * information as everybody else, and a severity communicated only by hue is
+ * no severity at all.
+ */
+
+.sev {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  vertical-align: 0.1em;
+}
+
+.sev-critical { background: #7a1f1f; color: #fff; border-color: #7a1f1f; }
+.sev-high     { background: #b4432b; color: #fff; border-color: #b4432b; }
+.sev-medium   { background: #c08a2a; color: #241a04; border-color: #c08a2a; }
+.sev-low      { background: var(--code-bg); color: var(--text-muted); }
+.sev-unknown  { background: var(--code-bg); color: var(--text-muted); }
+
+/* Present for a screen reader, absent from the page. Used for table captions,
+ * which name what a table holds without repeating a visible heading. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.symbols-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2rem;
+  font-size: 0.9rem;
+}
+
+.symbols-table th,
+.symbols-table td {
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.badge-kev {
+  background: #7a1f1f;
+  color: #fff;
+}

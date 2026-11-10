@@ -882,9 +882,45 @@ token primitives — plus two more negative row-level security tests, because
 `sessions` is a tenant table and one organisation reading another's session
 rows would be account takeover rather than a leak.
 
+### Done: the evidence pages
+
+The screen the product exists for. Every scanner can list advisory
+identifiers; what nobody shows is *why* a finding was kept or dropped, and
+that is the only part a person can check.
+
+So these pages follow one rule: **a verdict is never shown without the
+evidence for it.** A reachable finding shows the path hop by hop, with the
+file and line of each call. A cleared finding shows the symbols that were
+searched for and the entry points the search began from, because "not
+reachable" means nothing unless you know what was looked for and from where.
+Each page publishes the quality of the graph the answer rests on -- the
+unresolved-call ratio above all -- so a verdict can be judged rather than
+trusted.
+
+**Three situations are never collapsed into each other:** a proven path, a
+path that depends on a call resolved conservatively, and no analysis at all. A
+single dynamic hop is marked on the path itself, because it is the difference
+between a proven path and a guess. A finding with no reachability row says
+"Nobody looked" in those words, and says that this is not the same as "not
+reachable" -- the two produce the same short list of things to fix, and
+conflating them is how a scanner quietly hides a real vulnerability.
+
+Cleared findings are listed rather than hidden. "28 of your 38 findings cannot
+run" is exactly the claim a reader should want to check, and a clearance
+nobody can inspect is one nobody should believe.
+
+The call path is an ordered list rendered server-side. A viewer drawn by
+script would be invisible to a crawler, to a text browser, and to anybody
+reading a saved copy, and the whole value of evidence is that it travels.
+
+Twenty tests, including that a stored path containing junk renders the hops it
+can and drops the rest: the row came from an uploaded document, and the page a
+developer opens when something is already wrong must not be the one that
+answers 500.
+
 ### Remaining deliverables:
 - API (`/v1`): suppressions, webhooks, OpenAPI spec committed.
-- HTML UI in the same app (ADR-0011): the rest of the dashboard — scan list, finding detail with a server-rendered path viewer, diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the public report page, package pages and the badge are done.
+- HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor, suppressions — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
 - Row-level security, rate limiting, structured logging, tracing, Sentry.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 

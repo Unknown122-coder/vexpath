@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{#
+  One scan.
+
+  Two tables, and the split between them is the product: what needs attention,
+  then what was cleared. The cleared list is shown rather than hidden, because
+  "28 of your 38 findings cannot run" is precisely the claim a reader should
+  want to check, and a clearance nobody can inspect is one nobody should
+  believe.
+#}
+
+{% block title %}Scan of {{ project.slug }}{% endblock %}
+{% block description %}What this scan of {{ project.slug }} found, and why each verdict was reached.{% endblock %}
+
+{% macro findings_table(rows, caption) %}
+<table class="data-table">
+  <caption class="visually-hidden">{{ caption }}</caption>
+  <thead>
+    <tr>
+      <th scope="col">Advisory</th>
+      <th scope="col">Component</th>
+      <th scope="col">Severity</th>
+      <th scope="col">Verdict</th>
+      <th scope="col">Reachability</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <th scope="row">
+        <a href="/app/findings/{{ row.id }}">{{ row.advisory_id }}</a>
+        {% if row.kev %}<span class="badge badge-kev" title="In the CISA Known Exploited Vulnerabilities catalogue">exploited</span>{% endif %}
+      </th>
+      <td>
+        <code>{{ row.component_name }}@{{ row.component_version }}</code>
+        <span class="muted">{{ 'direct' if row.direct else 'transitive' }}</span>
+      </td>
+      <td>
+        <span class="sev sev-{{ row.severity | lower }}">{{ row.severity }}</span>
+        {% if row.epss_score %}<span class="muted">EPSS {{ '%.3f' | format(row.epss_score) }}</span>{% endif %}
+      </td>
+      <td>
+        {{ row.verdict }}
+        {% if row.fixed_in %}<span class="muted">fixed in {{ row.fixed_in }}</span>{% endif %}
+      </td>
+      <td>
+        {% if row.reach_status %}
+        {{ row.reach_status }}
+        <span class="muted">{{ row.reach_confidence }} confidence</span>
+        {% else %}
+        {# Not the same as "not reachable", and never shown as if it were. #}
+        <span class="muted">not analysed</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <p class="muted">
+      <a href="/app">Projects</a> ·
+      <a href="/app/projects/{{ project.slug }}">{{ project.slug }}</a>
+    </p>
+    <h1>Scan of <code>{{ project.slug }}</code></h1>
+    <dl class="facts">
+      <dt>Run</dt>
+      <dd><time datetime="{{ scan.created_at.isoformat() }}">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</time> ({{ scan.mode }})</dd>
+      {% if scan.git_ref or scan.git_sha %}
+      <dt>Ref</dt>
+      <dd>{{ scan.git_ref or '—' }} {% if scan.git_sha %}<code>{{ scan.git_sha[:12] }}</code>{% endif %}</dd>
+      {% endif %}
+      <dt>Analysed by</dt>
+      <dd>vexpath core {{ scan.core_version }}</dd>
+      <dt>Advisory corpus</dt>
+      <dd>
+        {% if scan.advisory_snapshot_id %}
+        <code>{{ scan.advisory_snapshot_id }}</code>
+        {% else %}
+        not pinned — these verdicts cannot be re-derived
+        {% endif %}
+      </dd>
+      {% if sbom %}
+      <dt>Components</dt>
+      <dd>{{ sbom.component_count }} ({{ sbom.format }})</dd>
+      {% endif %}
+    </dl>
+  </header>
+
+  {% if truncated %}
+  <p class="notice notice-warn">
+    Showing the first {{ total }} findings of a larger scan. Use
+    <code>vexpath scan --format json</code> for the complete document.
+  </p>
+  {% endif %}
+
+  <section aria-labelledby="attention">
+    <h2 id="attention">Needs attention <span class="muted">{{ needs_attention | length }}</span></h2>
+    {% if not needs_attention %}
+    <p class="muted">
+      Nothing in this scan needs attention.
+      {% if cleared %}
+      {{ cleared | length }} finding{{ '' if cleared | length == 1 else 's' }} were cleared, listed below with the evidence.
+      {% endif %}
+    </p>
+    {% else %}
+    {{ findings_table(needs_attention, "Findings needing attention") }}
+    {% endif %}
+  </section>
+
+  {% if cleared %}
+  <section aria-labelledby="cleared">
+    <h2 id="cleared">Cleared <span class="muted">{{ cleared | length }}</span></h2>
+    <p class="muted">
+      Each of these was matched by an advisory and then shown not to be
+      reachable. Open one to see the symbols that were searched for and the
+      entry points the search started from — that is what a clearance rests on.
+    </p>
+    {{ findings_table(cleared, "Cleared findings") }}
+  </section>
+  {% endif %}
+</article>
+{% endblock %}
