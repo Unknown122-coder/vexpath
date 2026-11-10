@@ -34,6 +34,11 @@ jobs:
       contents: read
       # For the SARIF upload below. Nothing else needs a write.
       security-events: write
+      # Also for the SARIF upload: on a private repository the uploader reads
+      # the workflow run to attach the results to it, and without this it
+      # fails with "Resource not accessible by integration", which names
+      # neither the permission nor the reason.
+      actions: read
       # So the scan on a pull request can say what it found.
       pull-requests: write
     steps:
@@ -90,6 +95,11 @@ jobs:
         # Deliberately always: without this, a failing gate means no alerts,
         # and the run that failed is the one the alerts are for.
         if: always()
+        # Tolerated while this repository is private: code scanning needs
+        # GitHub Advanced Security there, and a permanently red workflow
+        # teaches everybody to ignore it. Remove this when the repository goes
+        # public, because a silently failing upload is worth noticing.
+        continue-on-error: true
         with:
           sarif_file: ${{ steps.vexpath.outputs.sarif }}
           category: vexpath
@@ -122,6 +132,18 @@ jobs:
           echo "cleared:         ${{ steps.vexpath.outputs.cleared }}"
           echo "reachable:       ${{ steps.vexpath.outputs.reachable }}"
           echo "analysed:        ${{ steps.vexpath.outputs.reachability_analysed }}"
+          # Which corpus produced those numbers. On a push this is the frozen
+          # test snapshot, which holds a handful of advisories for the fixture
+          # repositories and knows nothing about this project's real
+          # dependencies -- so a zero here means the plumbing works, not that
+          # this repository is clean. The scheduled run is the one that scans
+          # against today's advisories.
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
+            echo "corpus:          live advisory data"
+          else
+            echo "corpus:          the frozen test snapshot -- 0 findings proves the"
+            echo "                 pipeline works, NOT that this project is clean"
+          fi
           # A cleared count means nothing if the search never ran, so this is
           # checked rather than assumed. It is also the assertion that would
           # catch the Action silently losing its reachability analysis.
