@@ -21,6 +21,7 @@
          a sign-out on a GET can be triggered by any image tag on any page. #}
       {% if session is defined and session %}
       <a href="/app">Projects</a>
+      <a href="/app/webhooks">Webhooks</a>
       <a href="/app/keys">Keys</a>
       <form method="post" action="/logout" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">

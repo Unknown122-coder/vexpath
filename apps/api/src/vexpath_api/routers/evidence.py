@@ -229,6 +229,122 @@ PROBLEMS = {
 }
 
 
+@router.get("/scans/{scan_id}/diff", response_class=HTMLResponse, summary="What changed")
+async def diff_page(
+    scan_id: str, request: Request, session: RequiredSession, connection: SessionConnection
+) -> HTMLResponse:
+    """What changed between this scan and the one before it.
+
+    The question somebody actually has after a build: not "what is wrong with
+    this project" but "what did my change do". A list of 38 findings answers
+    the first and buries the second.
+
+    Computed on view rather than stored at ingest, deliberately. A stored diff
+    is correct only against the scan that happened to precede it at the time;
+    recomputing means the page is right even for a scan uploaded out of order,
+    which happens whenever two branches build at once.
+    """
+    scan = (
+        (await connection.execute(select(scans).where(scans.c.id == scan_id)))
+        .mappings()
+        .one_or_none()
+    )
+    if scan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such scan")
+
+    project = (
+        (await connection.execute(select(projects).where(projects.c.id == scan["project_id"])))
+        .mappings()
+        .one()
+    )
+    previous = (
+        (
+            await connection.execute(
+                select(scans)
+                .where(
+                    (scans.c.project_id == scan["project_id"])
+                    & (scans.c.created_at < scan["created_at"])
+                )
+                .order_by(scans.c.created_at.desc())
+                .limit(1)
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+    current_rows = await _findings(connection, scan_id)
+    previous_rows = await _findings(connection, previous["id"]) if previous is not None else []
+
+    return render(
+        request,
+        "app_diff.html",
+        {
+            "session": session,
+            "project": dict(project),
+            "scan": dict(scan),
+            "previous": dict(previous) if previous is not None else None,
+            **_compare(current_rows, previous_rows),
+        },
+    )
+
+
+def _identity(row: dict[str, Any]) -> tuple[str, str]:
+    """What makes two findings across scans the same finding.
+
+    The advisory and the component's purl, which includes the version. A
+    dependency upgraded from 1.0 to 1.1 therefore reads as the old finding
+    gone and a new one arrived, which is the truthful answer: the same
+    advisory against a different version is a different fact, and collapsing
+    them would hide an upgrade that fixed nothing.
+    """
+    return (row["advisory_id"], row["purl"])
+
+
+def _compare(current: list[dict[str, Any]], previous: list[dict[str, Any]]) -> dict[str, Any]:
+    """New, gone, changed and unchanged, in the order they should be read.
+
+    "Changed" is its own category and not folded into "unchanged". A finding
+    whose verdict moved from not-reachable to reachable is the single most
+    important line this page can carry, and in a two-column diff of identities
+    alone it would not appear at all.
+    """
+    before = {_identity(row): row for row in previous}
+    after = {_identity(row): row for row in current}
+
+    appeared = [row for key, row in after.items() if key not in before]
+    resolved = [row for key, row in before.items() if key not in after]
+
+    changed: list[dict[str, Any]] = []
+    unchanged = 0
+    for key, row in after.items():
+        was = before.get(key)
+        if was is None:
+            continue
+        if was["verdict"] != row["verdict"] or was["reach_status"] != row["reach_status"]:
+            changed.append(
+                {"finding": row, "was_verdict": was["verdict"], "was_reach": was["reach_status"]}
+            )
+        else:
+            unchanged += 1
+
+    def worst_first(row: dict[str, Any]) -> tuple[int, int, bool, str]:
+        return (
+            VERDICT_ORDER.get(row["verdict"], 9),
+            SEVERITY_ORDER.get(row["severity"], 9),
+            not row["kev"],
+            row["advisory_id"],
+        )
+
+    return {
+        "appeared": sorted(appeared, key=worst_first),
+        "resolved": sorted(resolved, key=worst_first),
+        "changed": sorted(changed, key=lambda item: worst_first(item["finding"])),
+        "unchanged": unchanged,
+        "total": len(current),
+    }
+
+
 @router.get("/findings/{finding_id}", response_class=HTMLResponse, summary="One finding")
 async def finding_page(
     finding_id: str,

@@ -89,6 +89,7 @@
       <dd>{{ sbom.component_count }} ({{ sbom.format }})</dd>
       {% endif %}
     </dl>
+    <p><a href="/app/scans/{{ scan.id }}/diff">What changed since the previous scan</a></p>
   </header>
 
   {% if truncated %}

@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{#
+  Webhooks.
+
+  The rules are stated on the form rather than only in the error, because they
+  are not arbitrary: each one closes a way of using a URL field to reach
+  something that is only reachable from inside this network. Somebody who
+  understands why will not spend ten minutes trying variations.
+
+  The delivery history is on this page, not behind a link. "I registered it and
+  nothing arrived" is the only question anybody asks, and the answer is always
+  in the last few attempts.
+#}
+
+{% block title %}Webhooks{% endblock %}
+{% block description %}Endpoints notified when a scan completes or something reachable turns up.{% endblock %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <h1>Webhooks</h1>
+    <p class="muted">{{ session.org_name }} · <code>{{ session.org_slug }}</code></p>
+  </header>
+
+  {% if issued %}
+  <section class="notice notice-key" role="alert" aria-labelledby="new-secret-heading">
+    <h2 id="new-secret-heading">Signing secret for {{ issued.url }}</h2>
+    <p>
+      <strong>Copy it now.</strong> It is stored encrypted so deliveries can be
+      signed, and it is never displayed again.
+    </p>
+    <p>
+      <label class="visually-hidden" for="new-secret">Signing secret</label>
+      <input id="new-secret" class="secret" type="text" readonly value="{{ issued.secret }}"
+             size="60" spellcheck="false" autocomplete="off">
+    </p>
+    <p class="muted">
+      Your endpoint should compute
+      <code>HMAC-SHA256(secret, "{timestamp}." + body)</code> and compare it
+      with <code>X-Vexpath-Signature</code> in constant time. The timestamp is
+      in <code>X-Vexpath-Timestamp</code>; reject anything older than five
+      minutes, which is what stops a captured delivery being replayed.
+    </p>
+  </section>
+  {% endif %}
+
+  {% if problem %}
+  <p class="notice notice-warn" role="alert">{{ problem }}</p>
+  {% endif %}
+
+  {% if webhooks %}
+  {% for hook in webhooks %}
+  <section class="notice" aria-labelledby="hook-{{ loop.index }}">
+    <h2 id="hook-{{ loop.index }}">
+      <code>{{ hook.url }}</code>
+      {% if hook.disabled_at %}
+      <span class="badge badge-kev">disabled</span>
+      {% endif %}
+    </h2>
+    <dl class="facts">
+      <dt>Events</dt>
+      <dd>{% for event in hook.events %}<code>{{ event }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+      <dt>Scope</dt>
+      <dd>{% if hook.project_id %}one project{% else %}every project in this organisation{% endif %}</dd>
+      <dt>Secret</dt>
+      <dd><code>{{ hook.secret_fingerprint }}</code></dd>
+      <dt>Deliveries</dt>
+      <dd>{{ hook.delivery_count }}{% if hook.failure_count %} · {{ hook.failure_count }} consecutive failures{% endif %}</dd>
+      {% if hook.description %}
+      <dt>Note</dt><dd>{{ hook.description }}</dd>
+      {% endif %}
+    </dl>
+
+    {% if hook.disabled_at %}
+    <p>
+      This webhook was switched off after repeated failures. It is kept rather
+      than deleted so you can see that it stopped and why.
+    </p>
+    {% endif %}
+
+    {% if hook.deliveries %}
+    <table class="data-table">
+      <caption class="visually-hidden">Recent deliveries to {{ hook.url }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">When</th>
+          <th scope="col">Event</th>
+          <th scope="col">Outcome</th>
+          <th scope="col">Attempts</th>
+          <th scope="col">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for delivery in hook.deliveries %}
+        <tr>
+          <th scope="row"><time datetime="{{ delivery.created_at.isoformat() }}">{{ delivery.created_at.strftime('%Y-%m-%d %H:%M') }}</time></th>
+          <td><code>{{ delivery.event }}</code></td>
+          <td>
+            {{ delivery.status }}
+            {% if delivery.response_status %}<span class="muted">{{ delivery.response_status }}</span>{% endif %}
+          </td>
+          <td>{{ delivery.attempts }}</td>
+          <td>
+            {# "Refused" and "failed" are different problems with different
+               fixes, so the word is shown rather than normalised away. #}
+            {% if delivery.error %}<span class="muted">{{ delivery.error }}</span>{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">Nothing delivered yet. Send a test below.</p>
+    {% endif %}
+
+    <p class="hook-actions">
+      <form method="post" action="/app/webhooks/{{ hook.id }}/ping" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="link-button">Send a test delivery</button>
+      </form>
+      {% if hook.disabled_at %}
+      <form method="post" action="/app/webhooks/{{ hook.id }}/enable" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="link-button">Re-enable</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/app/webhooks/{{ hook.id }}/delete" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="link-button">Delete</button>
+      </form>
+    </p>
+  </section>
+  {% endfor %}
+  {% else %}
+  <p class="muted">No webhooks yet.</p>
+  {% endif %}
+
+  <section aria-labelledby="add">
+    <h2 id="add">Add a webhook</h2>
+    <p class="muted">
+      Deliveries go only to the public internet, over <code>https</code>, on
+      port {{ allowed_ports | join(' or ') }}. An address on a private network
+      is refused, because a URL in this box would otherwise reach services
+      that are only reachable from inside — including the cloud metadata
+      endpoint that hands out credentials. Redirects are not followed, so
+      register the final URL.
+    </p>
+    <form method="post" action="/app/webhooks" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <p>
+        <label for="url">Endpoint</label>
+        <input id="url" name="url" type="url" required maxlength="2000"
+               placeholder="https://example.com/hooks/vexpath"
+               value="{{ submitted.url if submitted else '' }}"
+               autocomplete="off" spellcheck="false">
+      </p>
+      <fieldset>
+        <legend>Events</legend>
+        {% for event in events %}
+        <p>
+          <label for="event-{{ loop.index }}">
+            <input id="event-{{ loop.index }}" type="checkbox" name="events" value="{{ event }}"
+                   {% if submitted and event in submitted.events %}checked{% endif %}>
+            <code>{{ event }}</code>
+            {% if event == 'ping' %}<span class="hint">A test event, delivered only when you ask.</span>{% endif %}
+            {% if event == 'scan.completed' %}<span class="hint">Every scan, with its counts.</span>{% endif %}
+            {% if event == 'finding.new_reachable' %}<span class="hint">Only when something can actually run. The one worth waking somebody for.</span>{% endif %}
+          </label>
+        </p>
+        {% endfor %}
+      </fieldset>
+      <p>
+        <label for="project">Project <span class="muted">(optional)</span></label>
+        <input id="project" name="project" maxlength="100" placeholder="api"
+               value="{{ submitted.project if submitted else '' }}" autocomplete="off">
+        <span class="hint">
+          Left blank, this covers every project — including ones created later.
+        </span>
+      </p>
+      <p>
+        <label for="description">Note <span class="muted">(optional)</span></label>
+        <input id="description" name="description" maxlength="200" placeholder="#security-alerts in Slack">
+      </p>
+      <p><button type="submit" class="button">Add webhook</button></p>
+    </form>
+  </section>
+</article>
+{% endblock %}

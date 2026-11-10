@@ -1081,8 +1081,49 @@ you on demand.
 database, 42 through real HTTP, plus two more negative row-level security
 tests for the new tenant tables.
 
+### Done: the webhooks screen and the scan diff
+
+**The webhooks screen exists so the refusals reach a person.** A URL field
+that answers "not allowed" sends somebody to a support channel; one that says
+which rule and why is the difference between a security control and an
+obstacle. The rules are on the form before they are broken — https, a public
+address, port 443, no redirects — and a refused URL comes back with the whole
+explanation and the value still in the field. The signing secret appears on
+the response to the POST and never again, with the HMAC construction and the
+constant-time warning printed beside it, because that is the moment somebody
+is writing the receiver.
+
+The delivery history is on the same page rather than behind a link. "I
+registered it and nothing arrived" is the only question anybody asks about a
+webhook, and the answer is always in the last few attempts: refused for an
+address, failed with a 500, or delivered and the receiver dropped it. A
+disabled webhook says it was switched off after repeated failures, and
+re-enabling clears the count — without that, the next delivery's first retry
+would switch it off again.
+
+**The diff answers the question somebody actually has after a build**, which
+is not "what is wrong with this project" but "what did my change do". Four
+sections in reading order: appeared, changed verdict, gone, and a count of
+what stayed the same.
+
+"Changed verdict" is its own section rather than folded into "unchanged",
+because a finding that moved from not-reachable to reachable is the single
+most important line the page can carry and a diff of identities alone would
+not show it at all. Identity is the advisory *and* the component purl,
+version included, so an upgrade from 1.0 to 1.1 reads as the old finding gone
+and a new one arrived — the truthful answer, since the same advisory against a
+different version is a different fact and collapsing them would hide an
+upgrade that fixed nothing.
+
+Computed on view rather than stored at ingest: a stored diff is correct only
+against whichever scan happened to precede it at the time, and recomputing
+means the page is right even for a scan uploaded out of order, which happens
+whenever two branches build at once.
+
+Twenty-one tests.
+
 ### Remaining deliverables:
-- HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
+- HTML UI in the same app (ADR-0011): the policy editor, plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the scan diff, the webhooks screen, the public report page, package pages and the badge are done.
 - Structured logging, tracing, Sentry. Row-level security and rate limiting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 

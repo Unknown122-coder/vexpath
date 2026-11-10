@@ -26,6 +26,7 @@ from vexpath_api.routers import (
     evidence,
     findings,
     health,
+    hooks_pages,
     login,
     me,
     pages,
@@ -168,6 +169,7 @@ def create_app(
     app.include_router(login.router)
     app.include_router(dashboard.router)
     app.include_router(evidence.router)
+    app.include_router(hooks_pages.router)
 
     # HTML UI. Registered last so its catch-all routes cannot shadow /v1.
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

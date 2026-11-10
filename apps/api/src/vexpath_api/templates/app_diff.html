@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{#
+  What changed between two scans.
+
+  The question somebody actually has after a build is not "what is wrong with
+  this project" but "what did my change do". A list of 38 findings answers the
+  first and buries the second.
+
+  Four sections, in the order they should be read: what appeared, what changed
+  verdict, what went away, and a count of what stayed the same. "Changed" is
+  its own section rather than folded into "the same", because a finding that
+  moved from not-reachable to reachable is the single most important line this
+  page can carry and a diff of identities alone would not show it at all.
+#}
+
+{% block title %}What changed{% endblock %}
+{% block description %}Findings that appeared, changed or went away since the previous scan of {{ project.slug }}.{% endblock %}
+
+{% macro row(finding) %}
+<tr>
+  <th scope="row">
+    <a href="/app/findings/{{ finding.id }}">{{ finding.advisory_id }}</a>
+    {% if finding.kev %}<span class="badge badge-kev" title="In the CISA Known Exploited Vulnerabilities catalogue">exploited</span>{% endif %}
+  </th>
+  <td><code>{{ finding.component_name }}@{{ finding.component_version }}</code></td>
+  <td><span class="sev sev-{{ finding.severity | lower }}">{{ finding.severity }}</span></td>
+  <td>
+    {{ finding.verdict }}
+    {% if finding.reach_status %}<span class="muted">{{ finding.reach_status }}</span>{% else %}<span class="muted">not analysed</span>{% endif %}
+  </td>
+</tr>
+{% endmacro %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <p class="muted">
+      <a href="/app">Projects</a> ·
+      <a href="/app/projects/{{ project.slug }}">{{ project.slug }}</a> ·
+      <a href="/app/scans/{{ scan.id }}">scan</a>
+    </p>
+    <h1>What changed</h1>
+    {% if previous %}
+    <p class="muted">
+      Comparing
+      <time datetime="{{ scan.created_at.isoformat() }}">{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+      against
+      <a href="/app/scans/{{ previous.id }}"><time datetime="{{ previous.created_at.isoformat() }}">{{ previous.created_at.strftime('%Y-%m-%d %H:%M') }}</time></a>.
+    </p>
+    {% endif %}
+  </header>
+
+  {% if not previous %}
+  <section class="notice">
+    <h2>Nothing to compare against</h2>
+    <p>
+      This is the first scan of <code>{{ project.slug }}</code>, so every one
+      of its {{ total }} finding{{ '' if total == 1 else 's' }} is new by
+      definition. Upload another scan and this page will show the difference.
+    </p>
+  </section>
+  {% else %}
+
+  <section aria-labelledby="appeared">
+    <h2 id="appeared">Appeared <span class="muted">{{ appeared | length }}</span></h2>
+    {% if not appeared %}
+    <p class="muted">Nothing new.</p>
+    {% else %}
+    <p class="muted">
+      Present now and not before. A dependency upgraded to a new version shows
+      up here rather than as a change, because the same advisory against a
+      different version is a different fact — and collapsing the two would
+      hide an upgrade that fixed nothing.
+    </p>
+    <table class="data-table">
+      <caption class="visually-hidden">Findings that appeared</caption>
+      <thead>
+        <tr><th scope="col">Advisory</th><th scope="col">Component</th><th scope="col">Severity</th><th scope="col">Verdict</th></tr>
+      </thead>
+      <tbody>
+        {% for finding in appeared %}{{ row(finding) }}{% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="changed">
+    <h2 id="changed">Changed verdict <span class="muted">{{ changed | length }}</span></h2>
+    {% if not changed %}
+    <p class="muted">No verdict moved.</p>
+    {% else %}
+    <p class="muted">
+      The same advisory on the same version, concluded differently. Usually
+      because new symbols were extracted for the advisory, or because your own
+      code now reaches code it did not before.
+    </p>
+    <table class="data-table">
+      <caption class="visually-hidden">Findings whose verdict changed</caption>
+      <thead>
+        <tr>
+          <th scope="col">Advisory</th>
+          <th scope="col">Component</th>
+          <th scope="col">Was</th>
+          <th scope="col">Now</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in changed %}
+        <tr>
+          <th scope="row">
+            <a href="/app/findings/{{ item.finding.id }}">{{ item.finding.advisory_id }}</a>
+          </th>
+          <td><code>{{ item.finding.component_name }}@{{ item.finding.component_version }}</code></td>
+          <td>
+            {{ item.was_verdict }}
+            {% if item.was_reach %}<span class="muted">{{ item.was_reach }}</span>{% endif %}
+          </td>
+          <td>
+            <strong>{{ item.finding.verdict }}</strong>
+            {% if item.finding.reach_status %}<span class="muted">{{ item.finding.reach_status }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="resolved">
+    <h2 id="resolved">Gone <span class="muted">{{ resolved | length }}</span></h2>
+    {% if not resolved %}
+    <p class="muted">Nothing went away.</p>
+    {% else %}
+    <p class="muted">
+      In the previous scan and not in this one — usually an upgrade, sometimes
+      a dependency removed.
+    </p>
+    <table class="data-table">
+      <caption class="visually-hidden">Findings no longer present</caption>
+      <thead>
+        <tr><th scope="col">Advisory</th><th scope="col">Component</th><th scope="col">Severity</th><th scope="col">Verdict</th></tr>
+      </thead>
+      <tbody>
+        {% for finding in resolved %}{{ row(finding) }}{% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  <p class="muted">
+    {{ unchanged }} finding{{ '' if unchanged == 1 else 's' }} unchanged.
+  </p>
+  {% endif %}
+</article>
+{% endblock %}
