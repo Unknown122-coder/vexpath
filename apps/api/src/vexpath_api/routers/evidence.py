@@ -19,14 +19,15 @@ reading a saved page, and the whole value of the evidence is that it travels.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from vexpath_api.session import RequiredSession, SessionConnection
+from vexpath_api.suppress import applicable, remaining_days
 from vexpath_api.templating import render
 from vexpath_core.enums import Verdict
 from vexpath_db.tables import (
@@ -36,6 +37,7 @@ from vexpath_db.tables import (
     reachability_results,
     sboms,
     scans,
+    suppressions,
 )
 
 router = APIRouter(prefix="/app", tags=["dashboard"], include_in_schema=False)
@@ -208,9 +210,32 @@ async def _findings(connection: AsyncConnection, scan_id: str) -> list[dict[str,
     )
 
 
+#: What a refused suppression says. A closed vocabulary rather than text
+#: echoed from the query string: a sentence taken from a URL and rendered on a
+#: page is how a phishing message gets hosted on somebody else's domain, and
+#: autoescaping stops the markup rather than the sentence.
+PROBLEMS = {
+    "reason": (
+        "That suppression needs a reason. One nobody explained cannot be "
+        "reviewed, and an unreviewable suppression is how a vulnerability "
+        "stays hidden."
+    ),
+    "duration": (
+        "A suppression has to run for at least a day and at most 730. Beyond "
+        "that the expiry is a formality, which is the thing an expiry exists "
+        "to prevent."
+    ),
+    "invalid": "That suppression could not be recorded.",
+}
+
+
 @router.get("/findings/{finding_id}", response_class=HTMLResponse, summary="One finding")
 async def finding_page(
-    finding_id: str, request: Request, session: RequiredSession, connection: SessionConnection
+    finding_id: str,
+    request: Request,
+    session: RequiredSession,
+    connection: SessionConnection,
+    problem: Annotated[str | None, Query()] = None,
 ) -> HTMLResponse:
     """One finding, with the whole chain of reasoning behind its verdict.
 
@@ -261,6 +286,20 @@ async def finding_page(
         .one()
     )
 
+    # The suppression, if there is one. Fetched and shown rather than used to
+    # hide the finding: a suppression is a decision about what to work on, not
+    # a change to what the analysis found, and the evidence underneath it
+    # stays exactly as it was.
+    stored = [
+        dict(entry)
+        for entry in (
+            await connection.execute(
+                select(suppressions).where(suppressions.c.project_id == row["project_id"])
+            )
+        ).mappings()
+    ]
+    suppression = applicable(stored, advisory_id=row["advisory_id"], purl=row["purl"])
+
     return render(
         request,
         "app_finding.html",
@@ -270,6 +309,9 @@ async def finding_page(
             "project": dict(project),
             "reach": dict(reach) if reach is not None else None,
             "path": _path_steps(reach),
+            "problem": PROBLEMS.get(problem or ""),
+            "suppression": suppression,
+            "suppression_days": remaining_days(suppression) if suppression else 0,
             # Said rather than implied. A clearance with no analysis behind it
             # is not a clearance, and the page must not look the same as one
             # that was actually proved.
@@ -316,4 +358,4 @@ def _path_steps(reach: Any) -> list[dict[str, Any]]:
     return steps
 
 
-__all__ = ["PAGE_SIZE", "SEVERITY_ORDER", "VERDICT_ORDER", "router"]
+__all__ = ["PAGE_SIZE", "PROBLEMS", "SEVERITY_ORDER", "VERDICT_ORDER", "router"]

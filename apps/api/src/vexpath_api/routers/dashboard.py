@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Form, Request, status
+from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -38,9 +38,18 @@ from vexpath_api.session import (
     RequiredSession,
     SessionConnection,
 )
+from vexpath_api.suppress import DEFAULT_DAYS, SuppressionError, build
 from vexpath_api.templating import render
 from vexpath_core.ids import new_ulid
-from vexpath_db.tables import api_keys, audit_log, findings, projects, scans
+from vexpath_db.tables import (
+    api_keys,
+    audit_log,
+    components,
+    findings,
+    projects,
+    scans,
+    suppressions,
+)
 from vexpath_platform import apikeys
 from vexpath_platform.logging import get_logger
 
@@ -405,6 +414,150 @@ async def _keys(connection: AsyncConnection) -> list[dict[str, Any]]:
         )
     ).mappings()
     return [dict(row) for row in rows]
+
+
+# --- Suppressions -----------------------------------------------------------
+
+
+@router.post("/findings/{finding_id}/suppress", summary="Suppress a finding")
+async def suppress_finding(
+    finding_id: str,
+    session: CsrfVerified,
+    connection: SessionConnection,
+    reason: Annotated[str, Form()] = "",
+    days: Annotated[int, Form()] = DEFAULT_DAYS,
+    whole_project: Annotated[str, Form()] = "",
+) -> RedirectResponse:
+    """Record a decision not to fix this finding.
+
+    Scoped to this one component unless the form says otherwise, because a
+    project-wide suppression also covers packages added next month, and that
+    is a bigger decision than the button it would otherwise share.
+
+    A refusal sends the person back to the finding with the reason in the
+    query string, which is how a form error survives a redirect without a
+    session to stash it in.
+    """
+    row = (
+        (
+            await connection.execute(
+                select(
+                    findings.c.advisory_id,
+                    components.c.purl,
+                    scans.c.project_id,
+                )
+                .join(components, components.c.id == findings.c.component_id)
+                .join(scans, scans.c.id == findings.c.scan_id)
+                .where(findings.c.id == finding_id)
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such finding")
+
+    try:
+        request = build(
+            advisory_id=row["advisory_id"],
+            reason=reason,
+            days=days,
+            purl=None if whole_project else row["purl"],
+        )
+    except SuppressionError as exc:
+        # A code, not the message. Text taken from a query string and
+        # rendered on a page is how a phishing message gets hosted on
+        # somebody else's domain -- autoescaping stops the markup, not the
+        # sentence. The page holds the wording.
+        log.info("app.suppression.refused", org=session.org_id, reason=str(exc))
+        return RedirectResponse(
+            f"/app/findings/{finding_id}?problem={_problem_code(exc)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    identifier = new_ulid()
+    await connection.execute(
+        insert(suppressions).values(
+            id=identifier,
+            org_id=session.org_id,
+            project_id=row["project_id"],
+            advisory_id=request.advisory_id,
+            purl=request.purl,
+            reason=request.reason,
+            justification=request.justification,
+            expires_at=request.expires_at,
+            created_by=session.user_id,
+        )
+    )
+    await connection.execute(
+        insert(audit_log).values(
+            id=new_ulid(),
+            org_id=session.org_id,
+            actor_type="user",
+            actor_id=session.user_id,
+            action="suppression.created",
+            target_type="suppression",
+            target_id=identifier,
+            metadata={
+                "advisory": request.advisory_id,
+                "purl": request.purl,
+                "reason": request.reason,
+                "expires_at": request.expires_at.isoformat(),
+                "login": session.login,
+            },
+        )
+    )
+    log.info("app.suppression.created", org=session.org_id, advisory=request.advisory_id)
+    return RedirectResponse(f"/app/findings/{finding_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _problem_code(exc: SuppressionError) -> str:
+    """Which of the refusals this was, as one word.
+
+    A closed vocabulary shared with the template, so the only text that
+    reaches the page is text this repository wrote.
+    """
+    message = str(exc)
+    if "needs a reason" in message:
+        return "reason"
+    if "at most" in message or "at least" in message:
+        return "duration"
+    return "invalid"
+
+
+@router.post("/suppressions/{suppression_id}/revoke", summary="Revoke a suppression")
+async def revoke_suppression(
+    suppression_id: str,
+    session: CsrfVerified,
+    connection: SessionConnection,
+    finding: Annotated[str, Form()] = "",
+) -> RedirectResponse:
+    """Bring a suppressed finding back into view.
+
+    Marked revoked rather than deleted: a finding that was suppressed for five
+    months and then was not is a different situation from one nobody ever
+    suppressed, and only the first is worth a conversation.
+    """
+    await connection.execute(
+        update(suppressions)
+        .where((suppressions.c.id == suppression_id) & (suppressions.c.revoked_at.is_(None)))
+        .values(revoked_at=apikeys.now())
+    )
+    await connection.execute(
+        insert(audit_log).values(
+            id=new_ulid(),
+            org_id=session.org_id,
+            actor_type="user",
+            actor_id=session.user_id,
+            action="suppression.revoked",
+            target_type="suppression",
+            target_id=suppression_id,
+            metadata={"login": session.login},
+        )
+    )
+    log.info("app.suppression.revoked", org=session.org_id, suppression=suppression_id)
+    destination = f"/app/findings/{finding}" if finding else "/app"
+    return RedirectResponse(destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
 __all__ = ["SLUG_CHARACTERS", "router"]

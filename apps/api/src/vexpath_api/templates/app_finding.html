@@ -38,6 +38,33 @@
     </p>
   </header>
 
+  {% if problem %}
+  <p class="notice notice-warn" role="alert">{{ problem }}</p>
+  {% endif %}
+
+  {% if suppression %}
+  <section class="notice" aria-labelledby="suppressed">
+    <h2 id="suppressed">Suppressed</h2>
+    <p>
+      Somebody decided not to act on this
+      {% if suppression.purl %}for this component{% else %}for every component in the project{% endif %},
+      and it expires in {{ suppression_days }} day{{ '' if suppression_days == 1 else 's' }}
+      (<time datetime="{{ suppression.expires_at.isoformat() }}">{{ suppression.expires_at.strftime('%Y-%m-%d') }}</time>).
+    </p>
+    <blockquote>{{ suppression.reason }}</blockquote>
+    <p class="muted">
+      A suppression is a decision about what to work on. It changes nothing
+      about what the analysis found: the evidence below is exactly as it was,
+      and the public report and badge still count this as reachable if it is.
+    </p>
+    <form method="post" action="/app/suppressions/{{ suppression.id }}/revoke" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <input type="hidden" name="finding" value="{{ finding.id }}">
+      <button type="submit" class="link-button">Bring it back</button>
+    </form>
+  </section>
+  {% endif %}
+
   <section aria-labelledby="verdict">
     <h2 id="verdict">Verdict</h2>
     <dl class="facts">
@@ -199,6 +226,43 @@
     </dl>
   </section>
   {% endif %}
+  {% endif %}
+
+  {% if not suppression %}
+  <section aria-labelledby="suppress">
+    <h2 id="suppress">Decide not to act</h2>
+    <p class="muted">
+      Recording the decision is better than the alternatives, which are a
+      <code>grep -v</code> in a CI script or a team that stops reading the
+      output. It needs a reason and it expires, because a suppression nobody
+      explained cannot be reviewed and one that never expires outlives the
+      situation that justified it.
+    </p>
+    <form method="post" action="/app/findings/{{ finding.id }}/suppress" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <p>
+        <label for="reason">Why</label>
+        <input id="reason" name="reason" required maxlength="2000"
+               placeholder="Upgrade blocked on the 3.0 migration, tracked in PLAT-412">
+      </p>
+      <p>
+        <label for="days">For how long</label>
+        <input id="days" name="days" type="number" value="90" min="1" max="730">
+        <span class="hint">Days. At most 730 — beyond that the expiry is a formality.</span>
+      </p>
+      <p>
+        <label for="whole_project">
+          <input id="whole_project" name="whole_project" type="checkbox" value="yes">
+          Every component in this project, not just
+          <code>{{ finding.component_name }}</code>
+        </label>
+        <span class="hint">
+          A project-wide suppression also covers packages added next month.
+        </span>
+      </p>
+      <p><button type="submit" class="button">Record this decision</button></p>
+    </form>
+  </section>
   {% endif %}
 </article>
 {% endblock %}

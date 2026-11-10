@@ -157,8 +157,25 @@ Base URL `https://api.<domain>/v1`. JSON everywhere; problem details (RFC 9457) 
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/findings/{id}` | Full detail including `reachability_result` and VEX statement |
-| `POST` | `/projects/{slug}/suppressions` | `{advisory_id, component_purl?, justification, reason, expires_at}` |
-| `DELETE` | `/suppressions/{id}` | |
+| `GET` | `/v1/suppressions?project=&include_inactive=` | Active ones by default; expired and revoked on request |
+| `POST` | `/v1/suppressions` | `{project, advisory_id, purl?, reason, justification?, days}`. A null `purl` covers every component of the project. |
+| `DELETE` | `/v1/suppressions/{id}` | Marks revoked; nothing is deleted |
+
+A suppression records a decision not to act. Two things are refused outright:
+one with a blank reason, because a suppression nobody explained cannot be
+reviewed, and one lasting more than 730 days, because beyond that the expiry
+is a formality and an expiry is the only thing separating a suppression from a
+deletion. Nothing deletes an expired row — "how long has this been ignored" is
+a question the history answers.
+
+**A suppression never changes the facts.** It does not rewrite a verdict, a
+severity, or anything the public report and badge say about reachable code. A
+badge reading "none reachable" because somebody suppressed the reachable one
+would be the most misleading artefact this system could produce. It also
+cannot change a CLI exit code: `vexpath scan` evaluates its policy locally
+with no knowledge of the platform, so a local gate is configured in
+`.vexpath.yml` and a platform suppression is a decision about what a team is
+working on.
 
 ### Advisory data (global, read-only)
 

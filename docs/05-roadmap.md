@@ -918,9 +918,52 @@ can and drops the rest: the row came from an uploaded document, and the page a
 developer opens when something is already wrong must not be the one that
 answers 500.
 
+### Done: suppressions
+
+Deciding not to fix something is a legitimate and common decision, and a tool
+that offers no way to record it gets one anyway — as a `grep -v` in a CI
+script, as a threshold nobody revisits, or as a team that stops reading the
+output. So this exists, shaped around the two ways it goes wrong.
+
+**A suppression with no expiry outlives the reason for it.** The column is not
+nullable, the duration is capped at 730 days, and the page says "expires in 11
+days" rather than a date, because one is a prompt and the other is just a
+date. Somebody has to look again, which is the only property separating a
+suppression from a deletion.
+
+**A suppression with no reason cannot be reviewed**, and an unreviewable
+suppression is how a vulnerability stays hidden after the person who hid it
+has left. Blank text is refused by the API and by the form, and the refusal
+says why rather than naming a field.
+
+Scope is the component by default. A project-wide suppression also covers
+packages added next month, which is a bigger decision than the button it would
+otherwise share, so it is a separate checkbox. Matching is exact on the purl:
+a prefix match would let a suppression written for one package quietly cover a
+differently-named package added later. The most specific one wins, so revoking
+a broad suppression does not silently unsuppress something that had its own
+entry.
+
+**And a suppression never changes the facts.** Not the verdict, not the
+severity, and not what the public report or badge says about reachable code —
+there is a test that suppresses a reachable finding and asserts the badge
+still reads "1 reachable". A badge saying otherwise would be the most
+misleading artefact this system could produce. It also cannot change a CLI
+exit code, because the CLI evaluates its policy locally with no knowledge of
+the platform; that is stated in the documentation rather than left for
+somebody to discover.
+
+Every create and revoke is written to the audit log with the reason as it was
+given. "Who decided not to fix this, and what did they say at the time" cannot
+be answered by a row that only holds the current state.
+
+Twenty-nine tests: eleven on the rules with no database, eighteen through real
+HTTP, including that the page refuses to echo a sentence from its own query
+string — autoescaping stops markup, not a phishing message.
+
 ### Remaining deliverables:
-- API (`/v1`): suppressions, webhooks, OpenAPI spec committed.
-- HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor, suppressions — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
+- API (`/v1`): webhooks, OpenAPI spec committed.
+- HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
 - Row-level security, rate limiting, structured logging, tracing, Sentry.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 
