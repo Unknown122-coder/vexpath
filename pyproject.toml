@@ -103,7 +103,7 @@ exclude = ["testdata/repos", "packages/db/src/vexpath_db/migrations/versions"]
 
 [[tool.mypy.overrides]]
 # Third-party packages without complete type information.
-module = ["packageurl.*", "msgpack.*", "procrastinate.*", "spdx_tools.*", "celpy.*"]
+module = ["packageurl.*", "msgpack.*", "procrastinate.*", "spdx_tools.*", "celpy.*", "sigstore.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

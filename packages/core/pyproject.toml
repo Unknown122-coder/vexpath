@@ -22,6 +22,10 @@ dependencies = [
     # bespoke matcher, because a policy is a thing people write and share and
     # a home-grown syntax would have to be learned for one tool only.
     "cel-python>=0.1.5",
+    # DSSE signing and verification with a static key. Part of the core rather
+    # than an extra, because an attestation nobody can verify offline is one
+    # an air-gapped reviewer cannot check at all.
+    "cryptography>=43.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +33,12 @@ dependencies = [
 # until the SPDX writer lands.
 spdx = [
     "spdx-tools>=0.8",
+]
+# Keyless signing. Optional because it only happens in CI, where an ambient
+# OIDC credential exists, and because the library pulls in a large
+# transitive tree that an offline verifier does not need.
+sigstore = [
+    "sigstore>=3.6",
 ]
 
 [build-system]

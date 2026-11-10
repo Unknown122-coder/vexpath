@@ -556,6 +556,52 @@ findings, because none was proven reachable and none is in the catalogue;
 hold the documented contract: 0 pass, 1 policy failed, 3 for a malformed or
 non-boolean policy, with the parse error pointing at the position.
 
+### Done: attestation
+
+A VEX document that says "this does not apply to us" is worth something only
+if a consumer can establish who said it. `vexpath attest sign|verify|inspect`
+is that, in the shape the ecosystem already reads: an in-toto Statement v1 in a
+DSSE envelope, signed keylessly through Sigstore in CI or with a static ed25519
+key anywhere.
+
+Three rules, each because the alternative produces a signature that means less
+than it appears to.
+
+**A statement must have a subject.** An attestation about nothing in particular
+cannot be matched to an artefact, so a verifier cannot tell whether it
+describes what they are holding. Building one without a subject raises. With
+nothing named, the subject is the document's own digest, which is weaker than
+naming a built artefact but is true.
+
+**The signature covers the payload type.** DSSE's pre-authentication encoding
+binds both, which is what stops a signed VEX document being presented as a
+signed SBOM. The implementation is checked against the specification's own
+example rather than against its own output, because an encoding that is almost
+right is a vulnerability rather than a bug, and round-tripping with itself
+would prove nothing.
+
+**A valid signature is a weaker fact than it sounds.** It may cover a different
+artefact, a different kind of claim, or come from a different signer.
+`--expect-type`, `--expect-subject`, `--expect-identity` and `--expect-issuer`
+close that gap, and the output names which of them were applied. Verifying with
+none applied says so out loud, because the common mistake is to read "verified"
+as more than it is.
+
+Keyless signing is preferred in CI and static keys are labelled as what they
+are: a static-key signature tells a consumer only that whoever holds that key
+made the claim. A failure to sign is always reported and never produces an
+unsigned envelope, because a pipeline that believes it is signing and is not is
+worse off than one that knows it is not.
+
+`attest inspect` describes an envelope without verifying it, and is a separate
+command on purpose. A tool that blurs describing and believing teaches people
+that a signature's presence is the same as its validity.
+
+Verified on the flask VEX document from the benchmark: signed, verified with
+the digest and predicate type required, and then shown to fail on a wrong
+predicate type, a wrong subject digest, a payload altered by one character, and
+a signature relabelled as another payload type.
+
 ### Remaining deliverables:
 - `core.vex`: OpenVEX 0.2.0 and CycloneDX VEX generation with impact and action statements generated from evidence; `vexpath vex export`.
 - `core.attest`: in-toto Statement v1, DSSE, Sigstore keyless signing (`sigstore-python`), Rekor inclusion proof, verification with identity/issuer constraints; `vexpath attest sign|verify`.

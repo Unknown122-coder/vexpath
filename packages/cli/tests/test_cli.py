@@ -7,6 +7,7 @@ JSON is polluted by a progress message breaks every pipeline that consumes it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -756,3 +757,220 @@ def test_a_scan_with_a_broken_policy_exits_with_a_config_error(
         ],
     )
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+
+
+# --- attest ----------------------------------------------------------------
+
+
+def _keypair(tmp_path: Path) -> tuple[Path, Path]:
+    private, public = tmp_path / "k.key", tmp_path / "k.pub"
+    result = runner.invoke(
+        app, ["attest", "keygen", "--private", str(private), "--public", str(public)]
+    )
+    assert result.exit_code == 0
+    return private, public
+
+
+def _vex_document(env: None, fixture_repos_dir: Path, tmp_path: Path) -> Path:
+    scanned = runner.invoke(
+        app,
+        ["scan", str(fixture_repos_dir / "direct-call"), "--format", "json", "--no-reach"],
+    )
+    results = tmp_path / "results.json"
+    results.write_text(scanned.stdout, encoding="utf-8")
+
+    document = tmp_path / "doc.vex.json"
+    exported = runner.invoke(
+        app,
+        [
+            "vex",
+            "export",
+            "--author",
+            "Example Org",
+            "--results",
+            str(results),
+            "-o",
+            str(document),
+        ],
+    )
+    assert exported.exit_code == 0
+    return document
+
+
+def test_keygen_refuses_to_overwrite_a_key_without_being_told(tmp_path: Path) -> None:
+    """Overwriting a signing key invalidates every signature made with it."""
+    private, public = _keypair(tmp_path)
+    again = runner.invoke(
+        app, ["attest", "keygen", "--private", str(private), "--public", str(public)]
+    )
+    assert again.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "already exists" in again.stderr
+
+
+def test_keygen_warns_that_the_key_is_unencrypted(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "attest",
+            "keygen",
+            "--private",
+            str(tmp_path / "a.key"),
+            "--public",
+            str(tmp_path / "a.pub"),
+        ],
+    )
+    assert "unencrypted" in result.stderr
+    assert "out of version control" in result.stderr
+
+
+def test_sign_and_verify_a_vex_document(env: None, fixture_repos_dir: Path, tmp_path: Path) -> None:
+    private, public = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    envelope = tmp_path / "doc.intoto.jsonl"
+
+    signed = runner.invoke(
+        app,
+        [
+            "attest",
+            "sign",
+            str(document),
+            "--type",
+            "vex",
+            "--key",
+            str(private),
+            "-o",
+            str(envelope),
+        ],
+    )
+    assert signed.exit_code == 0
+    assert "openvex.dev" in signed.stderr
+    # A static key names no workflow, and the output says so.
+    assert "developer" in signed.stderr or "static key" in signed.stderr
+
+    digest = hashlib.sha256(document.read_bytes()).hexdigest()
+    verified = runner.invoke(
+        app,
+        [
+            "attest",
+            "verify",
+            str(envelope),
+            "--key",
+            str(public),
+            "--expect-type",
+            "vex",
+            "--expect-subject",
+            digest,
+        ],
+    )
+    assert verified.exit_code == 0
+    assert "verified" in verified.stdout
+    assert "predicate type" in verified.stdout
+
+
+def test_verify_says_when_no_constraints_were_applied(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    """A bare signature says only that someone signed something."""
+    private, public = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    envelope = tmp_path / "doc.intoto.jsonl"
+    runner.invoke(
+        app, ["attest", "sign", str(document), "--key", str(private), "-o", str(envelope)]
+    )
+
+    result = runner.invoke(app, ["attest", "verify", str(envelope), "--key", str(public)])
+    assert result.exit_code == 0
+    assert "none applied" in result.stdout
+    assert "--expect-subject" in result.stdout
+
+
+def test_verify_fails_on_the_wrong_predicate_type(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    private, public = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    envelope = tmp_path / "doc.intoto.jsonl"
+    runner.invoke(
+        app, ["attest", "sign", str(document), "--key", str(private), "-o", str(envelope)]
+    )
+
+    result = runner.invoke(
+        app,
+        ["attest", "verify", str(envelope), "--key", str(public), "--expect-type", "results"],
+    )
+    assert result.exit_code == 1
+    assert "NOT VERIFIED" in result.stdout
+
+
+def test_verify_reports_json_for_a_pipeline(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    private, public = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    envelope = tmp_path / "doc.intoto.jsonl"
+    runner.invoke(
+        app, ["attest", "sign", str(document), "--key", str(private), "-o", str(envelope)]
+    )
+
+    result = runner.invoke(
+        app,
+        ["attest", "verify", str(envelope), "--key", str(public), "--format", "json"],
+    )
+    payload = json.loads(result.stdout)
+    assert payload["verified"] is True
+    assert payload["method"] == "static-key"
+    assert payload["predicate_type"] == "https://openvex.dev/ns/v0.2.0"
+    assert payload["constraints_applied"] == []
+
+
+def test_verify_requires_a_key_and_says_what_does_keyless(tmp_path: Path) -> None:
+    envelope = tmp_path / "e.jsonl"
+    envelope.write_text(
+        '{"payload": "e30=", "payloadType": "t", "signatures": []}', encoding="utf-8"
+    )
+    result = runner.invoke(app, ["attest", "verify", str(envelope)])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "cosign verify-attestation" in result.stderr
+
+
+def test_sign_refuses_an_unknown_document_type(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    private, _ = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    result = runner.invoke(
+        app, ["attest", "sign", str(document), "--type", "sbom", "--key", str(private)]
+    )
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "not one of" in result.stderr
+
+
+def test_sign_refuses_a_malformed_subject(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    private, _ = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    result = runner.invoke(
+        app,
+        ["attest", "sign", str(document), "--key", str(private), "--subject", "just-a-name"],
+    )
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert "name=sha256" in result.stderr
+
+
+def test_inspect_describes_without_claiming_verification(
+    env: None, fixture_repos_dir: Path, tmp_path: Path
+) -> None:
+    """Describing an envelope and believing it are different operations."""
+    private, _ = _keypair(tmp_path)
+    document = _vex_document(env, fixture_repos_dir, tmp_path)
+    envelope = tmp_path / "doc.intoto.jsonl"
+    runner.invoke(
+        app, ["attest", "sign", str(document), "--key", str(private), "-o", str(envelope)]
+    )
+
+    result = runner.invoke(app, ["attest", "inspect", str(envelope)])
+    payload = json.loads(result.stdout)
+    assert payload["verified"] is False
+    assert payload["predicate_type"] == "https://openvex.dev/ns/v0.2.0"
+    assert "Nothing here was verified" in result.stderr
