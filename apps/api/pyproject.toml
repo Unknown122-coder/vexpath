@@ -17,6 +17,14 @@ dependencies = [
     "python-multipart>=0.0.18",
 ]
 
+[project.optional-dependencies]
+# Error reporting. Optional because a deployment with no DSN loses nothing but
+# the reporting, and because this is a tool people run against their own code
+# where sending nothing anywhere is the right default.
+sentry = [
+    "sentry-sdk>=2.19",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

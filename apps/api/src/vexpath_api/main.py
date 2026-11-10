@@ -21,6 +21,7 @@ from starlette.responses import Response
 
 from vexpath_api import __version__
 from vexpath_api.oauth import IdentityProvider
+from vexpath_api.observability import RequestContextMiddleware
 from vexpath_api.routers import (
     dashboard,
     evidence,
@@ -43,6 +44,7 @@ from vexpath_db.engine import create_app_engine
 from vexpath_platform.eventloop import configure_event_loop
 from vexpath_platform.logging import configure_logging, get_logger
 from vexpath_platform.settings import Settings, get_settings
+from vexpath_platform.tracing import configure_sentry
 
 log = get_logger(__name__)
 
@@ -97,6 +99,10 @@ def create_app(
     """
     resolved = settings or get_settings()
     configure_logging(resolved)
+    # Before the application exists, so an error raised while building it
+    # is reported too. Returns whether it started, which is said once at
+    # start-up rather than left for an operator to guess.
+    reporting = configure_sentry(resolved)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -109,6 +115,7 @@ def create_app(
             version=__version__,
             environment=resolved.env.value,
             owns_engine=owns_engine,
+            error_reporting=reporting,
         )
         try:
             yield
@@ -139,6 +146,10 @@ def create_app(
         trust_proxy_headers=resolved.trust_proxy_headers,
         enabled=resolved.rate_limit_enabled,
     )
+    # Outermost, because every other middleware's log lines should carry
+    # the request id -- including a rate-limit refusal, which is the one
+    # somebody will ask about.
+    app.add_middleware(RequestContextMiddleware, trust_proxy_headers=resolved.trust_proxy_headers)
 
     @app.exception_handler(RedirectRequired)
     async def _redirect(request: Request, exc: RedirectRequired) -> Response:

@@ -84,6 +84,19 @@ class Settings(BaseSettings):
     github_oauth_base: str = "https://github.com"
     github_api_base: str = "https://api.github.com"
 
+    # --- Observability -----------------------------------------------------
+    #: Absent, nothing is reported anywhere and that is the right default for
+    #: a tool people run against their own code.
+    sentry_dsn: str | None = None
+    #: Performance tracing, off by default. A trace carries URLs and timings
+    #: from every request, so switching it on is a decision about what leaves
+    #: the process rather than a tuning knob.
+    sentry_traces_sample_rate: float = 0.0
+    #: The build this process is, attached to every error report. Set from the
+    #: commit in CI; the package version is a poor substitute because several
+    #: deploys share one.
+    release: str | None = None
+
     # --- Rate limiting -----------------------------------------------------
     rate_limit_enabled: bool = True
     #: Whether ``X-Forwarded-For`` may be believed. Off by default and on
@@ -92,6 +105,10 @@ class Settings(BaseSettings):
     #: it and exhaust somebody else's by claiming their address. Turn it on
     #: only where a known proxy terminates the connection.
     trust_proxy_headers: bool = False
+
+    @property
+    def error_reporting_configured(self) -> bool:
+        return bool(self.sentry_dsn)
 
     @property
     def sign_in_available(self) -> bool:

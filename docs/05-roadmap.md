@@ -1122,9 +1122,51 @@ whenever two branches build at once.
 
 Twenty-one tests.
 
+### Done: request correlation and error reporting
+
+**One access line per request**, after it finishes, with the request id,
+method, route template, status and duration. One line rather than two: a start
+line plus an end line doubles the volume to make hung requests visible, and a
+hung request is already visible as a missing line beside a complaining client.
+What a start line would have added, the request id gives for free — every line
+emitted *during* the request carries it, because it is bound into a context
+variable rather than threaded through call signatures.
+
+**The route template, never the literal path.** A slug or an advisory
+identifier in a URL is tenant data, and the threat model keeps tenant data out
+of the logs. It is also the only form that answers "how slow is the finding
+page" without a regular expression. Unmatched paths are logged as
+`<unmatched>`, which is worth telling apart: a flood of them is somebody
+scanning.
+
+**A presented request id is honoured only behind a trusted proxy, and
+sanitised either way.** The id goes into every line for the request, so a
+newline in it forges a second line into the stream somebody reads during an
+incident — there is a test that tries exactly that. An attacker who can choose
+the id can also make their requests share one with somebody else's, which is
+why it needs the same opt-in as `X-Forwarded-For`. The id is returned in a
+response header, because a user quoting it in a bug report is the difference
+between a five-minute search and an afternoon of guessing.
+
+**Error reporting is off unless a DSN is configured**, which is the right
+default for a tool people run against their own code. When it is on, three
+things that would default the other way are off, and each one would ship
+something the threat model forbids: request bodies (a scan upload's body *is*
+a dependency inventory), cookies and headers (a live session, a live key), and
+stack-frame locals (a frame inside the scanner holds the source it was
+parsing). A scrubbing hook is the last line rather than the only one — it
+drops the request section wholesale and redacts credential-shaped keys at
+every depth, because the three settings above can be re-enabled by somebody
+who does not know why they were off. A DSN configured without the library
+installed says so rather than pretending: a deployment that believes it has
+error reporting and does not is worse off than one that knows it has none.
+
+Twenty-three tests, including that a cyclic or absurdly nested event does not
+turn error reporting into a hang.
+
 ### Remaining deliverables:
 - HTML UI in the same app (ADR-0011): the policy editor, plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the scan diff, the webhooks screen, the public report page, package pages and the badge are done.
-- Structured logging, tracing, Sentry. Row-level security and rate limiting are done.
+- Row-level security, rate limiting, structured logging, request correlation and error reporting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 
 Acceptance:
