@@ -49,9 +49,17 @@ make check && make test-all && make e2e
 gh workflow run release.yml -f dry-run=true
 
 # 5. Tag it. The workflow refuses a tag that disagrees with the metadata.
-git tag -s vX.Y.Z -m "vX.Y.Z"
+#    -s signs the tag and needs a GPG or SSH signing key configured; -a is an
+#    annotated tag without one. Either is fine: what a consumer actually
+#    verifies is the SLSA provenance and PyPI's attestation, both produced by
+#    the workflow, not the tag.
+git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
+
+Pushing the tag is the irreversible step. PyPI does not allow a version to be
+replaced or a name to be released, so a tag pushed in error is fixed by a new
+version rather than undone.
 
 ## What the workflow does, and the order it does it in
 
