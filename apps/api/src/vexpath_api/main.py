@@ -36,6 +36,7 @@ from vexpath_api.routers import (
 )
 from vexpath_api.session import RedirectRequired
 from vexpath_api.templating import STATIC_DIR, build_templates
+from vexpath_api.throttle import RateLimitMiddleware
 from vexpath_db.engine import create_app_engine
 from vexpath_platform.eventloop import configure_event_loop
 from vexpath_platform.logging import configure_logging, get_logger
@@ -128,6 +129,14 @@ def create_app(
     app.state.templates = build_templates(resolved)
     app.state.identity_provider = identity_provider
     app.add_middleware(SecurityHeadersMiddleware)
+    # Added after, so it runs before: Starlette applies middleware in
+    # reverse order of registration, and a refusal should cost as little
+    # as possible.
+    app.add_middleware(
+        RateLimitMiddleware,
+        trust_proxy_headers=resolved.trust_proxy_headers,
+        enabled=resolved.rate_limit_enabled,
+    )
 
     @app.exception_handler(RedirectRequired)
     async def _redirect(request: Request, exc: RedirectRequired) -> Response:

@@ -961,10 +961,51 @@ Twenty-nine tests: eleven on the rules with no database, eighteen through real
 HTTP, including that the page refuses to echo a sentence from its own query
 string — autoescaping stops markup, not a phishing message.
 
+### Done: rate limiting
+
+Stated plainly, because a limiter sold as protection it does not provide is
+worse than none: this does **not** defend an API key against guessing. A key
+is 256 bits from the system random source; there is no rate at which guessing
+becomes feasible, and implying otherwise would invite somebody to shorten the
+key. What it defends against is a misconfigured CI job retrying in a tight
+loop, a scraper walking the public pages, and the cost of either.
+
+**The counter table is bounded.** An unbounded map keyed by a value the caller
+chooses is a denial of service with extra steps, and it is the usual way a
+hand-written limiter becomes the vulnerability it was added to prevent. The
+map is capped and evicts the oldest entry, so the failure mode is "that client
+stops being limited" rather than "the process dies" — and eviction is by age,
+so a client still sending is the one that stays tracked.
+
+**`X-Forwarded-For` is not believed by default.** It is a request header like
+any other. Trusting it without a proxy in front lets a caller evade their own
+limit by varying it and, worse, exhaust somebody else's allowance by claiming
+their address. A deployment behind a known proxy turns it on, and then only
+the last hop is used — the one the proxy wrote.
+
+The identity is the credential before the address, so one organisation's
+runaway job cannot consume another's allowance merely by sharing an office
+network or a CI runner. An API key is identified by sixteen hex characters of
+its hash and never by the key: a limiter whose state a heap profile would show
+must not be a place credentials are kept.
+
+A refused request still counts, so a client that keeps sending stays refused
+rather than discovering that rejections are free. `Retry-After` is the real
+number of seconds to the window turnover, never zero. Health checks are
+exempt, because a liveness probe answered with 429 takes the instance out of
+service and turns a rate limiter into an outage.
+
+The state is per process, which is a real limitation written down rather than
+hidden: two instances each allow the configured rate. The alternative, a
+shared counter in Postgres, costs a write on every request, and that trade is
+worth revisiting when there is a second instance.
+
+Twenty-two tests.
+
 ### Remaining deliverables:
 - API (`/v1`): webhooks, OpenAPI spec committed.
 - HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
-- Row-level security, rate limiting, structured logging, tracing, Sentry.
+- Structured logging, tracing, Sentry. Row-level security and rate limiting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 
 Acceptance:

@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     github_oauth_base: str = "https://github.com"
     github_api_base: str = "https://api.github.com"
 
+    # --- Rate limiting -----------------------------------------------------
+    rate_limit_enabled: bool = True
+    #: Whether ``X-Forwarded-For`` may be believed. Off by default and on
+    #: purpose: that header is a request header like any other, so trusting it
+    #: without a proxy in front lets a caller evade their own limit by varying
+    #: it and exhaust somebody else's by claiming their address. Turn it on
+    #: only where a known proxy terminates the connection.
+    trust_proxy_headers: bool = False
+
     @property
     def sign_in_available(self) -> bool:
         """Whether this deployment can sign anybody in.
