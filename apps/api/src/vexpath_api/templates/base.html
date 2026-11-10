@@ -17,7 +17,18 @@
     </a>
     <nav aria-label="Main">
       <a href="/docs">API</a>
-      <a href="/healthz">Status</a>
+      {# Signed in or not. The sign-out control is a form rather than a link:
+         a sign-out on a GET can be triggered by any image tag on any page. #}
+      {% if session is defined and session %}
+      <a href="/app">Projects</a>
+      <a href="/app/keys">Keys</a>
+      <form method="post" action="/logout" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="link-button">Sign out {{ session.login }}</button>
+      </form>
+      {% else %}
+      <a href="/login">Sign in</a>
+      {% endif %}
     </nav>
   </header>
 

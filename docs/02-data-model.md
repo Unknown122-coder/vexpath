@@ -143,6 +143,19 @@ Cache index for dependency call graphs stored in object storage.
 ### `orgs`, `users`, `users_orgs`, `api_keys`
 Standard. `api_keys.key_hash` is SHA-256 of the secret; the secret is shown once. Roles: `owner`, `member`.
 
+`users` has no password column. GitHub is the only identity provider, the
+account is keyed on `(provider, provider_subject)`, and the login is display
+only: a GitHub login can be renamed and the name claimed by somebody else, so
+keying on it would eventually sign one person into another person's account.
+
+### `sessions`
+A browser credential, deliberately separate from `api_keys`. Only
+`token_hash` (SHA-256 of the cookie value) is stored, `expires_at` is absolute
+and not nullable, and `org_id` is the organisation the session is *currently*
+acting as — switching organisation is an update to this row rather than a new
+sign-in. Resolved on the owner's connection, like an API key, because
+resolving the credential is how the organisation is discovered.
+
 ### `projects`
 | column | type | notes |
 |---|---|---|

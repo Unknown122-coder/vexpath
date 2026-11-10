@@ -124,6 +124,20 @@ def _seed(engine: Engine, org: str, *, visibility: str) -> None:
             {"id": f"{org}-key", "org": org, "hash": (org + "0").ljust(64, "0")[:64]},
         ),
         (
+            # A session is a browser credential and a tenant row like any
+            # other: one organisation must not be able to read or forge
+            # another's, which would be account takeover rather than a leak.
+            "INSERT INTO sessions (id, org_id, user_id, token_hash, expires_at) "
+            "VALUES (:id, :org, :user, :hash, :expires)",
+            {
+                "id": f"{org}-session",
+                "org": org,
+                "user": f"{org}-user",
+                "hash": (org + "1").ljust(64, "1")[:64],
+                "expires": now + timedelta(days=1),
+            },
+        ),
+        (
             "INSERT INTO projects (id, org_id, slug, visibility, entry_points, settings) "
             "VALUES (:id, :org, 'svc', :visibility, '[]', '{}')",
             {"id": f"{org}-project", "org": org, "visibility": visibility},

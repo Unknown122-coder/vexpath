@@ -189,6 +189,35 @@ Base URL `https://api.<domain>/v1`. JSON everywhere; problem details (RFC 9457) 
 
 `GET /me`, `GET/POST/DELETE /api-keys`, `GET /orgs/{slug}/members`, `GET /orgs/{slug}/audit-log`.
 
+### Sign-in and the signed-in pages
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/login` | Sign-in page. Says so plainly when the deployment has no OAuth credentials, rather than redirecting into a GitHub error. |
+| `GET` | `/auth/github/start` | Redirect to GitHub with a signed, time-limited state parameter carrying the return path |
+| `GET` | `/auth/github/callback` | State verified **before** the code is exchanged; a new account gets its own organisation and is its owner |
+| `POST` | `/logout` | Deletes the session and clears the cookie. A POST with a CSRF token: a sign-out on a GET can be triggered by any image tag on any page. |
+| `GET` | `/app` | Projects, with the latest scan of each |
+| `POST` | `/app/projects` | Create a project (private) |
+| `POST` | `/app/projects/{slug}/visibility` | Publish or unpublish; written to the audit log |
+| `GET` | `/app/keys` | API keys: name, visible prefix, last used |
+| `POST` | `/app/keys` | Issue a key. Answers with the page showing the secret once, never a redirect — a redirect would carry the secret into browser history, proxy logs and the next request's `Referer`. |
+| `POST` | `/app/keys/{id}/revoke` | Revoke a key |
+
+**The JSON API takes a bearer key and the HTML pages take a cookie, and no
+endpoint accepts both.** A browser sends its cookie automatically on any
+request to this origin, including one another site caused, which is precisely
+what cross-site request forgery exploits; an endpoint accepting either
+credential would inherit that for every caller. So `/v1` refuses cookies and
+the HTML routes refuse keys, and both are asserted by tests.
+
+Every state-changing form carries a CSRF token, derived as an HMAC of the
+session identifier rather than stored, so there is no second piece of state to
+fall out of step and no valid token can outlive its session. `SameSite=Lax`
+already blocks the cross-site POST; the token is the second lock on the same
+door, because a future endpoint needing a relaxed cookie policy must not
+silently remove the only defence.
+
 ### Webhooks (outbound)
 
 Per project: `scan.completed`, `finding.new_reachable`, `advisory.updated_affecting_project` (a newly published advisory or newly extracted symbols change a verdict for the latest scan; the platform re-evaluates reachability against stored graphs without a new scan). HMAC-SHA256 signed payloads, retries with backoff.

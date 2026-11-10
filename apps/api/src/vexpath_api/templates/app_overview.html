@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{#
+  The dashboard.
+
+  Three plain forms and a table. Every action is a POST to its own URL,
+  carrying a CSRF token, answering with a redirect. Nothing here needs script,
+  so nothing here has any: the page works with script disabled because that is
+  the only way it works at all.
+
+  The publish form is separate from everything else on purpose. It is the one
+  control whose effect is visible to the entire internet.
+#}
+
+{% block title %}Projects{% endblock %}
+{% block description %}Your projects, their latest scan, and what is published.{% endblock %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <h1>Projects</h1>
+    <p class="muted">{{ session.org_name }} · <code>{{ session.org_slug }}</code></p>
+  </header>
+
+  {% if error %}
+  <p class="notice notice-warn" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if not projects %}
+  <section class="notice">
+    <h2>Nothing here yet</h2>
+    <p>
+      A project is a repository you scan. Create one below, issue an
+      <a href="/app/keys">API key</a>, then upload a scan:
+    </p>
+    <pre><code>vexpath login
+vexpath scan . --upload --project my-service</code></pre>
+  </section>
+  {% else %}
+  <table class="data-table">
+    <caption class="visually-hidden">Projects and their latest scan</caption>
+    <thead>
+      <tr>
+        <th scope="col">Project</th>
+        <th scope="col">Latest scan</th>
+        <th scope="col">Needs attention</th>
+        <th scope="col">Cleared</th>
+        <th scope="col">Report</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for project in projects %}
+      {% set latest = project.latest %}
+      <tr>
+        <th scope="row">
+          <code>{{ project.slug }}</code>
+          {% if project.repo_url %}
+          <span class="muted">{{ project.repo_url }}</span>
+          {% endif %}
+        </th>
+        <td>
+          {% if latest %}
+          <time datetime="{{ latest.created_at.isoformat() }}">{{ latest.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+          {% if latest.git_ref %}<span class="muted">{{ latest.git_ref }}</span>{% endif %}
+          {% else %}
+          <span class="muted">never</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if latest and latest.summary %}
+          {{ latest.summary.get('needs_attention', latest.finding_count) }}
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if latest and latest.summary %}
+          {{ latest.summary.get('cleared', 0) }}
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {# The publish control: its own form, its own button, one field. #}
+          <form method="post" action="/app/projects/{{ project.slug }}/visibility" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            {% if project.visibility == 'public' %}
+            <a href="/p/{{ session.org_slug }}/{{ project.slug }}">public</a>
+            <input type="hidden" name="visibility" value="private">
+            <button type="submit" class="link-button">Unpublish</button>
+            {% else %}
+            <span class="muted">private</span>
+            <input type="hidden" name="visibility" value="public">
+            <button type="submit" class="link-button">Publish</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <section aria-labelledby="new-project">
+    <h2 id="new-project">Add a project</h2>
+    <form method="post" action="/app/projects" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <p>
+        <label for="slug">Name</label>
+        <input id="slug" name="slug" required minlength="2" maxlength="100"
+               pattern="[a-z0-9][a-z0-9._/-]*[a-z0-9]"
+               autocapitalize="none" autocomplete="off" spellcheck="false">
+        <span class="hint">Lower case, used in the report URL. For example <code>api</code> or <code>acme/web</code>.</span>
+      </p>
+      <p>
+        <label for="repo_url">Repository <span class="muted">(optional)</span></label>
+        <input id="repo_url" name="repo_url" type="url" maxlength="300"
+               placeholder="https://github.com/acme/api" autocomplete="off">
+      </p>
+      <p><button type="submit" class="button">Create project</button></p>
+    </form>
+  </section>
+</article>
+{% endblock %}

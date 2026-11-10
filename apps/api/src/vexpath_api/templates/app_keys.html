@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{#
+  API keys.
+
+  The secret appears in exactly one response in its life: the one that created
+  it. Not in a redirect, because the URL would carry it into browser history,
+  into any proxy log on the way, and into the Referer header of the next
+  request. The page says it will not be shown again, and that is literally
+  true: only the SHA-256 is stored.
+#}
+
+{% block title %}API keys{% endblock %}
+{% block description %}Keys the command-line tool and CI use to upload scans.{% endblock %}
+
+{% block content %}
+<article class="app">
+  <header class="app-header">
+    <h1>API keys</h1>
+    <p class="muted">{{ session.org_name }} · <code>{{ session.org_slug }}</code></p>
+  </header>
+
+  {% if issued %}
+  <section class="notice notice-key" role="alert" aria-labelledby="new-key">
+    <h2 id="new-key">Your new key</h2>
+    <p>
+      <strong>Copy it now.</strong> This is the only time it is shown — only a
+      hash of it is stored, so nobody, including us, can show it to you again.
+    </p>
+    {# A text input rather than a <code> block: it can be selected with the
+       keyboard alone, and copied without script. #}
+    <p>
+      <label class="visually-hidden" for="new-secret">New API key</label>
+      <input id="new-secret" class="secret" type="text" readonly value="{{ issued.secret }}"
+             size="60" spellcheck="false" autocomplete="off">
+    </p>
+    <p>Use it from the command line:</p>
+    <pre><code>vexpath login --key {{ issued.secret }}</code></pre>
+    <p class="muted">
+      In CI, set it as <code>VEXPATH_API_KEY</code> from a secret instead. An
+      exported key takes precedence over a stored one, which is what makes a
+      shared build machine safe.
+    </p>
+  </section>
+  {% endif %}
+
+  {% if error %}
+  <p class="notice notice-warn" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if keys %}
+  <table class="data-table">
+    <caption class="visually-hidden">API keys for this organisation</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Key</th>
+        <th scope="col">Created</th>
+        <th scope="col">Last used</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for key in keys %}
+      <tr{% if key.revoked_at %} class="revoked"{% endif %}>
+        <th scope="row">{{ key.name }}</th>
+        <td><code>{{ key.prefix }}…</code></td>
+        <td><time datetime="{{ key.created_at.isoformat() }}">{{ key.created_at.strftime('%Y-%m-%d') }}</time></td>
+        <td>
+          {% if key.last_used_at %}
+          <time datetime="{{ key.last_used_at.isoformat() }}">{{ key.last_used_at.strftime('%Y-%m-%d %H:%M') }}</time>
+          {% else %}
+          <span class="muted">never</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if key.revoked_at %}
+          <span class="muted">revoked</span>
+          {% else %}
+          <form method="post" action="/app/keys/{{ key.id }}/revoke" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            <button type="submit" class="link-button">Revoke</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No keys yet. Create one to upload a scan from CI or the command line.</p>
+  {% endif %}
+
+  <section aria-labelledby="new">
+    <h2 id="new">Create a key</h2>
+    <p class="muted">
+      A key is the organisation: whoever holds it can upload scans and read
+      findings. Give each place that needs one its own, so revoking is not a
+      choice between everything and nothing.
+    </p>
+    <form method="post" action="/app/keys" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <p>
+        <label for="name">What is it for</label>
+        <input id="name" name="name" maxlength="100" placeholder="github-actions" autocomplete="off">
+      </p>
+      <p><button type="submit" class="button">Create key</button></p>
+    </form>
+  </section>
+</article>
+{% endblock %}

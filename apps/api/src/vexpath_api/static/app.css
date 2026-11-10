@@ -231,3 +231,164 @@ code {
   color: var(--text-muted);
   font-size: 0.8125rem;
 }
+
+/* --- Forms and the signed-in pages ---------------------------------------
+ *
+ * No JavaScript anywhere in this interface, so every control here is a native
+ * one: a form, a button, a label. That is a constraint worth the trouble, and
+ * these rules are what make native controls look deliberate rather than
+ * unstyled.
+ */
+
+.narrow {
+  max-width: 48ch;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}
+
+.app {
+  max-width: 76rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.app-header {
+  margin-bottom: 2rem;
+}
+
+.app-header h1 {
+  margin-bottom: 0.25rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover,
+.button:focus-visible {
+  filter: brightness(1.08);
+}
+
+/* A button that reads as a link, for a destructive action that must still be
+ * a form submission rather than a GET. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inline-form {
+  display: inline flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0;
+}
+
+.stack-form {
+  max-width: 44ch;
+}
+
+.stack-form p {
+  margin: 0 0 1.1rem;
+}
+
+.stack-form label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.stack-form input {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.hint {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.notice {
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.notice-warn {
+  border-color: #c08a2a;
+}
+
+/* The one-time display of a new key. Marked out because it is the only thing
+ * on any page that cannot be recovered if it is missed. */
+.notice-key {
+  border-color: var(--accent);
+  border-left-width: 4px;
+}
+
+.secret {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 2.5rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.data-table thead th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.data-table .muted {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.data-table tr.revoked {
+  opacity: 0.55;
+}
+
+.site-header nav {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+}

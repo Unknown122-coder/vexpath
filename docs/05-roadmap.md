@@ -789,9 +789,102 @@ page and no badge, that unpublishing withdraws both, and that a project which
 does not exist answers identically to one that is not published so nobody can
 enumerate private names.
 
+### Done: the command-line loop
+
+The platform accepted scan uploads and nothing in the command-line tool could
+send one. That is not a missing feature, it is two halves that do not meet, and
+until they do each one is demonstrable and the product is not.
+
+**A key is read from `$VEXPATH_API_KEY` before the stored file.** CI supplies
+it from a secret, and a stale credential file on a shared build machine must
+not shadow it. Every command says which source won, because "which key am I
+using" is the question behind most authentication confusion and the answer is
+almost always that one place quietly overrode another. `logout` says plainly
+when an exported key means you are still signed in.
+
+The secret is never printed — not in a confirmation, not in an error, not in a
+`repr`, which matters because tracebacks are produced exactly when attention is
+elsewhere. The file is written through a temporary file whose permissions are
+restricted before any content reaches it, and its path appears in the output of
+every command that touches it: a credential nobody can find is one nobody
+rotates. `login` verifies the key against `/v1/me` before storing it, so a typo
+fails now rather than as an unexplained rejection three commands later.
+
+`scan --upload` resolves the credential **before** the analysis starts, so the
+two mistakes that would otherwise throw away a four-minute scan are reported in
+a second. It uploads before the policy decides the exit code, because the scan
+the platform most needs is the one that just failed a gate. A refused upload
+still says the scan itself completed: the exit code cannot say it, and a CI log
+read in a hurry would otherwise be understood as the analysis having failed.
+
+`vexpath upload` exists for the pipeline that scans in one job and uploads in
+another, and validates the document through the same model the server uses, so
+a truncated artefact is described in terms of the file rather than as a 422
+naming a field nobody chose.
+
+### Done: signing in, sessions and the first screens
+
+**The JSON API takes a bearer key, the HTML pages take a cookie, and no
+endpoint accepts both.** That separation is the security of the whole UI. A
+browser sends its cookie automatically on any request to this origin, including
+one another site caused, which is what cross-site request forgery is; an
+endpoint that accepted either credential would hand that problem to every
+caller. `/v1` refuses cookies, the HTML routes refuse keys, and both directions
+are asserted.
+
+**The OAuth state parameter is verified before the authorisation code is
+exchanged.** Without the parameter, an attacker completes a flow with their own
+code in a victim's browser and the victim ends up signed into the attacker's
+account, uploading their dependency inventory to it. Without that *ordering*,
+the code has already been spent by the time the forgery is noticed. The state is
+signed and time-limited rather than stored, so it needs no table and no cleanup,
+and it carries the page the user was trying to reach so signing in resumes what
+they were doing. It cannot carry them off-site: anything that is not a
+single-slash-rooted local path is discarded, because "you were signed out, sign
+in again" phishing works precisely by making the link point at the real site.
+
+**The account is keyed on GitHub's numeric subject, never the login.** A login
+can be renamed and the old name claimed by somebody else, so keying on it would
+eventually sign one person into another person's account — the worst thing an
+identity layer can do. There is no password column to forget to hash.
+
+**Every form carries a CSRF token**, derived as an HMAC of the session
+identifier rather than stored, so nothing can fall out of step and no token can
+outlive its session. `SameSite=Lax` already blocks the cross-site POST; this is
+the second lock on the same door. Domain separation keeps a CSRF token from
+being a valid state parameter, which it otherwise would be.
+
+**A new key's secret is shown on the page that created it and never again**,
+and the page is the response to the POST rather than a redirect: a redirect
+would carry the secret in a URL, into browser history, into any proxy log on
+the way, and into the next request's `Referer` header. Only the SHA-256 is
+stored, so the claim that it cannot be shown again is literal rather than
+a policy.
+
+The identity provider is an interface with a real implementation and a
+stand-in, so every branch of the flow is tested without a network: a cancelled
+authorisation, a forged state, a provider that errors, a GitHub account with no
+verified address. Those are the branches that otherwise answer 500 the first
+time a real person meets them.
+
+Nothing in these pages is JavaScript. Not "works without it as a fallback" —
+there is none to fall back from. Every action is a form POST to its own URL
+answering with a redirect, which still works in a text browser, with a screen
+reader, and under a content-security policy that forbids script.
+
+**The loop closes**, and there is one test that says so: sign in, create a
+project, issue a key on the keys page, and upload a scan with that key through
+`/v1/scans`. Each half was already covered; what silently fails is the join,
+when two halves are built a week apart.
+
+Sixty-two tests cover it — 41 through real HTTP and a real database, 21 on the
+token primitives — plus two more negative row-level security tests, because
+`sessions` is a tenant table and one organisation reading another's session
+rows would be account takeover rather than a leak.
+
 ### Remaining deliverables:
-- API (`/v1`): GitHub OAuth login, suppressions, webhooks, OpenAPI spec committed.
-- HTML UI in the same app (ADR-0011): dashboard (projects, scans, finding detail with server-rendered path viewer, diff between scans, policy editor, API keys), public report page, package pages, badge rendering, docs site. Jinja2 templates, HTMX attributes, Tailwind compiled by the standalone binary.
+- API (`/v1`): suppressions, webhooks, OpenAPI spec committed.
+- HTML UI in the same app (ADR-0011): the rest of the dashboard — scan list, finding detail with a server-rendered path viewer, diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the public report page, package pages and the badge are done.
 - Row-level security, rate limiting, structured logging, tracing, Sentry.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
 

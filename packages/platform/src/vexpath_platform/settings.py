@@ -72,6 +72,38 @@ class Settings(BaseSettings):
     osv_api_base: str = "https://api.osv.dev"
     github_token: str | None = None
 
+    # --- Sign-in -----------------------------------------------------------
+    #: GitHub is the only identity provider at launch. Absent, the sign-in
+    #: page says so rather than redirecting to a broken authorisation URL:
+    #: a deployment missing its credentials should be obvious on the page
+    #: that needs them, not a 500 from GitHub.
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
+    #: Overridable so a test can point the whole flow at a local stand-in
+    #: without monkeypatching a URL constant.
+    github_oauth_base: str = "https://github.com"
+    github_api_base: str = "https://api.github.com"
+
+    @property
+    def sign_in_available(self) -> bool:
+        """Whether this deployment can sign anybody in.
+
+        Both halves or neither: a client id with no secret produces an
+        authorisation redirect that fails at the exchange, which is the most
+        confusing possible way to be misconfigured.
+        """
+        return bool(self.github_client_id and self.github_client_secret)
+
+    @property
+    def cookies_require_https(self) -> bool:
+        """Whether the session cookie carries ``Secure``.
+
+        On everywhere there is HTTPS to use, which is everywhere but local
+        development. Expressed as a property so no handler has to work out
+        the rule, and so getting it wrong is one change rather than several.
+        """
+        return self.env is not Environment.LOCAL and self.env is not Environment.TEST
+
     @model_validator(mode="after")
     def _reject_insecure_production(self) -> Settings:
         if self.env.is_production and self.secret_key == _LOCAL_SECRET:

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{#
+  The sign-in page.
+
+  A link, not a button posting a form. Beginning an authorisation flow changes
+  nothing on this side, so a GET is the honest method, and a link works in
+  every browser ever made.
+
+  There is no password field here and there is no password column in the
+  database. An identity this system does not store is one it cannot leak.
+#}
+
+{% block title %}Sign in{% endblock %}
+{% block description %}Sign in with GitHub to see your projects and issue an API key.{% endblock %}
+
+{% block content %}
+<article class="narrow">
+  <h1>Sign in</h1>
+
+  {% if error %}
+  <p class="notice notice-warn" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if available %}
+  <p>
+    Sign in with GitHub. This asks for your account name and verified email
+    address, and nothing else — no access to any repository.
+  </p>
+  <p>
+    <a class="button" href="/auth/github/start?next={{ next | urlencode }}" rel="nofollow">Continue with GitHub</a>
+  </p>
+  <p class="muted">
+    A new account gets its own organisation. Everything you upload is private
+    until you publish it.
+  </p>
+  {% else %}
+  <p class="notice notice-warn">
+    Sign-in is not configured on this deployment. It needs
+    <code>VEXPATH_GITHUB_CLIENT_ID</code> and
+    <code>VEXPATH_GITHUB_CLIENT_SECRET</code>.
+  </p>
+  <p>
+    The command-line tool does not need an account:
+    <code>vexpath scan</code> runs entirely locally and reads advisories from
+    a snapshot. An account is only for keeping scans and publishing reports.
+  </p>
+  {% endif %}
+</article>
+{% endblock %}

@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -19,7 +20,19 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from vexpath_api import __version__
-from vexpath_api.routers import findings, health, me, pages, projects, public, scans
+from vexpath_api.oauth import IdentityProvider
+from vexpath_api.routers import (
+    dashboard,
+    findings,
+    health,
+    login,
+    me,
+    pages,
+    projects,
+    public,
+    scans,
+)
+from vexpath_api.session import RedirectRequired
 from vexpath_api.templating import STATIC_DIR, build_templates
 from vexpath_db.engine import create_app_engine
 from vexpath_platform.eventloop import configure_event_loop
@@ -59,13 +72,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def create_app(settings: Settings | None = None, *, engine: AsyncEngine | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    engine: AsyncEngine | None = None,
+    identity_provider: IdentityProvider | None = None,
+) -> FastAPI:
     """Build the ASGI application.
 
     Args:
         settings: Configuration to use. Defaults to the process environment.
         engine: An existing engine to adopt, which lets tests supply their own
             database without the lifespan creating a second one.
+        identity_provider: Sign-in provider to use instead of the one built
+            from configuration. The injection point that makes every branch
+            of the sign-in flow reachable without a network, including the
+            failures, which are the ones that otherwise answer 500 the first
+            time a real user meets them.
     """
     resolved = settings or get_settings()
     configure_logging(resolved)
@@ -101,7 +124,20 @@ def create_app(settings: Settings | None = None, *, engine: AsyncEngine | None =
 
     app.state.settings = resolved
     app.state.templates = build_templates(resolved)
+    app.state.identity_provider = identity_provider
     app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.exception_handler(RedirectRequired)
+    async def _redirect(request: Request, exc: RedirectRequired) -> Response:
+        """Send a browser somewhere else.
+
+        Raised by the session guards, which run as dependencies and so
+        cannot return a response. A 401 with a JSON body is the right
+        answer to a mis-authenticated API call and a dead end for a person
+        who needs to sign in.
+        """
+        del request
+        return RedirectResponse(exc.location, status_code=exc.status_code)
 
     # JSON API. Every one of these obtains its database connection through a
     # dependency that authenticates and scopes in the same step, so there is
@@ -111,6 +147,12 @@ def create_app(settings: Settings | None = None, *, engine: AsyncEngine | None =
     app.include_router(scans.router)
     app.include_router(findings.router)
     app.include_router(me.router)
+
+    # Sign-in and the signed-in pages. Cookie-authenticated, and the only
+    # routes that are: /v1 refuses cookies so no endpoint there inherits
+    # the cross-site request forgery problem a browser credential brings.
+    app.include_router(login.router)
+    app.include_router(dashboard.router)
 
     # HTML UI. Registered last so its catch-all routes cannot shadow /v1.
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

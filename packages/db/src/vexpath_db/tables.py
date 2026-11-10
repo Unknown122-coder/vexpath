@@ -238,6 +238,7 @@ TENANT_TABLE_NAMES: tuple[str, ...] = (
     "users",
     "users_orgs",
     "api_keys",
+    "sessions",
     "projects",
     "scans",
     "sboms",
@@ -332,6 +333,31 @@ api_keys = Table(
     Column("revoked_at", DateTime(timezone=True), nullable=True),
     UniqueConstraint("key_hash"),
     Index("ix_api_keys_org", "org_id"),
+)
+
+
+sessions = Table(
+    "sessions",
+    metadata,
+    Column("id", String(26), primary_key=True),
+    # The organisation this session is currently acting as. A person can
+    # belong to several; this is the one their next page load applies to, and
+    # it is what the row-level security policy compares against.
+    Column("org_id", String(26), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False),
+    Column("user_id", String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    # SHA-256 of the cookie value. The token itself exists in the browser and
+    # in the response that set it, never here: a database disclosure must not
+    # hand over live sessions.
+    Column("token_hash", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("last_seen_at", DateTime(timezone=True), nullable=True),
+    # Absolute, and not nullable. A session with no expiry is a credential
+    # that outlives the laptop it was created on.
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    UniqueConstraint("token_hash"),
+    # Signing out everywhere is a lookup by person, not by token.
+    Index("ix_sessions_user", "user_id"),
 )
 
 
