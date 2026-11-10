@@ -32,19 +32,21 @@ would resolve nothing.
 ## Cutting a release
 
 ```sh
-# 1. One version, everywhere. A test refuses a mismatch, and so does the
-#    release workflow before it builds anything.
-#    packages/*/pyproject.toml, apps/*/pyproject.toml, and the pinned
-#    `vexpath-core==X.Y.Z` in each dependent.
+# 1. One version, everywhere -- ten places across eight files, so it is a
+#    tool rather than an edit. It refuses a version that is not one, and
+#    reads everything back to check nothing disagrees.
+uv run python tools/bump_version.py X.Y.Z
 
-# 2. The pinned version in the Action, which must be a release that exists.
-#    apps/action/action.yml -> pinned="X.Y.Z"   (a test asserts this matches)
-
-# 3. Prove it builds, installs on its own, and runs.
+# 2. Prove it builds, installs on its own, and runs.
 make dist
 
-# 4. The gate.
+# 3. The gate.
 make check && make test-all && make e2e
+
+# 4. Optional but recommended for a first release: a dry run in CI, which
+#    does the version check, the gate and the install proof and publishes
+#    nothing.
+gh workflow run release.yml -f dry-run=true
 
 # 5. Tag it. The workflow refuses a tag that disagrees with the metadata.
 git tag -s vX.Y.Z -m "vX.Y.Z"
@@ -142,8 +144,9 @@ Three things need accounts and are not done yet:
 
 ## Version numbers
 
-`0.0.x` while the schema and the command surface can still move. The things
-that constrain a bump:
+`0.x` while the command surface can still move. `0.1.0` is the first release
+anybody is asked to install; `0.0.1` was the scaffold. The things that
+constrain a bump:
 
 - **`vexpath.results/N`**, the results schema identifier, which the platform
   validates uploads against. A breaking change to it is a new `N`, not a new

@@ -97,6 +97,12 @@ jobs:
     # That is the point: a statement about what built an artefact is worth
     # less when the thing making the statement is the thing being described.
     needs: [build]
+    # Only on a tag. The generator attaches its provenance to the release for
+    # that tag, so on a manual dry run there is nothing to attach it to and it
+    # fails for a reason that has nothing to do with the build. A dry run is
+    # then exactly the first three steps: version check, gate, and proving the
+    # wheel installs.
+    if: ${{ github.ref_type == 'tag' }}
     permissions:
       actions: read
       id-token: write

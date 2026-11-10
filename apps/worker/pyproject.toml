@@ -1,6 +1,6 @@
 [project]
 name = "vexpath-worker"
-version = "0.0.1"
+version = "0.1.0"
 description = "Background jobs: advisory sync, patch diffing, call-graph builds, hosted scans and result ingest."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -8,9 +8,9 @@ license = "Apache-2.0"
 license-files = ["../../LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
-    "vexpath-core==0.0.1",
-    "vexpath-db==0.0.1",
-    "vexpath-platform==0.0.1",
+    "vexpath-core==0.1.0",
+    "vexpath-db==0.1.0",
+    "vexpath-platform==0.1.0",
     "typer>=0.15",
 ]
 
