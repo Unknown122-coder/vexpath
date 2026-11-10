@@ -682,8 +682,64 @@ privilege, because an actor who can rewrite their own audit trail has none, and
 the application cannot write to the advisory corpus at all, because an endpoint
 that could change an advisory could change a verdict.
 
+### Done: API keys, projects and scan upload
+
+The three pieces a CI job needs to get its conclusions onto the platform.
+
+**Authentication and scoping are one dependency, not two.** An endpoint
+obtains a database connection only through a dependency that authenticates and
+then puts the organisation into the session, so there is no arrangement of
+dependencies that yields a request which is authenticated and unscoped. That
+combination is the shape of a data leak, so it is made unreachable rather than
+discouraged.
+
+**A key is a bearer credential, so the handling follows from that.** Only the
+SHA-256 is stored and the secret is shown once, which means a database
+disclosure hands over no working credentials. A plain hash deliberately, not
+bcrypt: the secret is 256 bits from the system random source, so guessing is
+not the threat and a slow hash would only add latency to every request. The
+prefix is stored in the clear so a dashboard can tell two keys apart, and is a
+fixed recognisable string so secret scanners match it.
+
+**Every authentication failure says the same thing.** A caller learns the key
+does not work, never whether it was unknown, revoked or malformed, because
+each of those narrows a search. The comparison is constant-time and runs even
+when no key was found, against a fixed value, so timing does not reveal which
+identifiers exist.
+
+**The organisation comes from the credential, never from the request body.** A
+caller who could name it could create a project inside someone else's
+organisation, and the policy would then happily let them read it back. A
+project is private until someone says otherwise, because a default of public
+would publish a dependency inventory by omission.
+
+**A project that is not yours is 404, not 403.** Saying it exists but is not
+yours turns the endpoint into a way of asking whether a competitor uses this
+platform and what they call their services.
+
+**An upload is validated through the same model the analysis produced**, so a
+malformed or hand-edited document is refused at the boundary rather than
+becoming rows nothing can interpret, and a document asserting a clearance the
+analysis never established is refused by the model's own invariant. The whole
+ingest is one transaction: a half-stored scan would show findings whose
+evidence is missing, which reads as "nothing to see here" rather than as a
+broken upload.
+
+Fifty tests, against real HTTP and a real database. Most of them try to cross
+the boundary: every endpoint is asked to show one organisation the other's
+projects, scans and findings.
+
+Two real problems came out of writing it. Windows defaults to an event loop
+psycopg's asynchronous mode cannot use, which is now set once in the platform
+package for the process entry point and the tests alike rather than
+rediscovered by whoever runs the API on Windows next. And the 422 handler used
+a status constant Starlette has deprecated, which under this project's
+warnings-as-errors policy turned a correct refusal into a 500: the policy
+caught a bug that would otherwise have shipped as an intermittent server error
+on malformed input.
+
 ### Remaining deliverables:
-- API (`/v1`): auth (GitHub OAuth, API keys), projects, scan upload and ingest worker, findings with evidence, suppressions, audit log, badge endpoint, public endpoints, webhooks, OpenAPI spec committed.
+- API (`/v1`): GitHub OAuth login, findings with evidence, suppressions, badge endpoint, public endpoints, webhooks, OpenAPI spec committed.
 - HTML UI in the same app (ADR-0011): dashboard (projects, scans, finding detail with server-rendered path viewer, diff between scans, policy editor, API keys), public report page, package pages, badge rendering, docs site. Jinja2 templates, HTMX attributes, Tailwind compiled by the standalone binary.
 - Row-level security, rate limiting, structured logging, tracing, Sentry.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.

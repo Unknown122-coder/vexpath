@@ -14,6 +14,13 @@ from pathlib import Path
 
 import pytest
 
+from vexpath_platform.eventloop import configure_event_loop
+
+# Windows defaults to an event loop psycopg's asynchronous mode cannot use, so
+# every asynchronous database test would fail with an interface error naming
+# the loop and not the remedy. Set once, at collection, for the whole run.
+configure_event_loop()
+
 REPO_ROOT = Path(__file__).parent
 TESTDATA = REPO_ROOT / "testdata"
 

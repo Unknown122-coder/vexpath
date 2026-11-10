@@ -19,9 +19,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from vexpath_api import __version__
-from vexpath_api.routers import health, pages
+from vexpath_api.routers import health, pages, projects, scans
 from vexpath_api.templating import STATIC_DIR, build_templates
 from vexpath_db.engine import create_app_engine
+from vexpath_platform.eventloop import configure_event_loop
 from vexpath_platform.logging import configure_logging, get_logger
 from vexpath_platform.settings import Settings, get_settings
 
@@ -102,8 +103,12 @@ def create_app(settings: Settings | None = None, *, engine: AsyncEngine | None =
     app.state.templates = build_templates(resolved)
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # JSON API. Routers for projects, scans and findings join this group in M4.
+    # JSON API. Every one of these obtains its database connection through a
+    # dependency that authenticates and scopes in the same step, so there is
+    # no arrangement of them that yields an authenticated, unscoped request.
     app.include_router(health.router)
+    app.include_router(projects.router)
+    app.include_router(scans.router)
 
     # HTML UI. Registered last so its catch-all routes cannot shadow /v1.
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -111,6 +116,11 @@ def create_app(settings: Settings | None = None, *, engine: AsyncEngine | None =
 
     return app
 
+
+# Windows defaults to an event loop psycopg's asynchronous mode cannot use.
+# Done here, before the application exists, because the policy is process-wide
+# and create_app must not have side effects of that kind.
+configure_event_loop()
 
 #: Module-level application for ``uvicorn vexpath_api.main:app``.
 app = create_app()
