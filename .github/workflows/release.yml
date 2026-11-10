@@ -1,0 +1,183 @@
+# Release: build, prove it installs, publish, and prove what built it.
+#
+# Triggered by a tag, never by a push to a branch. A release is a deliberate
+# act and a tag is the record of the decision.
+#
+# Nothing here holds a token. PyPI publishing uses Trusted Publishing, so the
+# job authenticates with its own OIDC identity and there is no API token to
+# provision, rotate or leak -- which for a tool whose whole subject is supply
+# chain security is the only defensible choice. Configure the publisher once
+# at https://pypi.org/manage/project/vexpath/settings/publishing/ with this
+# repository, this workflow filename and the `pypi` environment.
+#
+# The order is build -> verify -> publish -> attest, and the verify step is
+# not a formality. Everything in the test suite runs inside the workspace,
+# where every package is installed; a module imported without being declared
+# as a dependency passes every test and breaks on install. That happened once
+# already, so the wheel is installed into an empty environment and run before
+# anything is published, because a release cannot be taken back.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Build and verify without publishing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Check the tag matches the version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(uv run python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('packages/cli/pyproject.toml').read_text())['project']['version'])")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            # A tag that disagrees with the metadata produces a release
+            # nobody can find by version, and PyPI would reject or accept the
+            # wrong thing. Refused here, before anything is built.
+            echo "::error::tag ${GITHUB_REF_NAME} does not match version ${version}"
+            exit 1
+          fi
+
+      - name: Run the gate
+        run: |
+          set -euo pipefail
+          uv sync --all-packages
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy packages/core/src packages/db/src packages/platform/src \
+                       packages/cli/src apps/api/src
+          # Unit tests only: the integration suite needs Postgres and the
+          # acceptance suite needs a browser, and both run on every push
+          # already. A release must not be the first time anybody looks.
+          uv run pytest -m "not integration"
+
+      - name: Build and prove the wheel installs on its own
+        run: uv run python tools/verify_dist.py
+
+      - name: Record the hashes for provenance
+        id: hash
+        run: |
+          set -euo pipefail
+          cd dist
+          # base64 of the sha256sum output, which is the shape the SLSA
+          # generator expects.
+          echo "hashes=$(sha256sum ./* | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          # Short: the artefact exists to hand the files to the publish job,
+          # and the published files live on PyPI afterwards.
+          retention-days: 7
+
+  provenance:
+    # The official SLSA generator, run as its own reusable workflow so the
+    # provenance is produced by something this repository does not control.
+    # That is the point: a statement about what built an artefact is worth
+    # less when the thing making the statement is the thing being described.
+    needs: [build]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: ${{ needs.build.outputs.hashes }}
+      upload-assets: true
+
+  publish:
+    needs: [build, provenance]
+    if: ${{ github.ref_type == 'tag' && !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    environment:
+      # A protected environment, so publishing can require a review. The one
+      # irreversible step in this workflow is the one worth a second pair of
+      # eyes.
+      name: pypi
+      url: https://pypi.org/project/vexpath/
+    permissions:
+      # For Trusted Publishing. No API token anywhere.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # All six packages at once. They are released together and pin each
+          # other at an exact version, so a partial publish would leave
+          # `vexpath` unresolvable.
+          packages-dir: dist
+          # Fail rather than skip: a version already on PyPI means something
+          # is wrong with the tag, and silently doing nothing would look like
+          # a successful release.
+          skip-existing: false
+          attestations: true
+
+  image:
+    needs: [build]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - uses: docker/build-push-action@v6
+        id: push
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+      - name: Attest the image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

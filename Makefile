@@ -62,6 +62,13 @@ migration: ## Create a migration: make migration m="add findings table"
 regen-snapshot: ## Rebuild the frozen test advisory snapshot from tools/build_test_snapshot.py
 	$(UV) run python tools/build_test_snapshot.py
 
+dist: ## Build every package and prove the wheel installs on its own
+# Not just `uv build`: everything in the test suite runs inside the workspace
+# where every package is installed, so a module imported without being
+# declared passes every test and breaks on install. This installs into an
+# empty environment and runs the command.
+	$(UV) run python tools/verify_dist.py
+
 openapi: ## Rewrite apps/api/openapi.json from the application's routes
 	$(UV) run python tools/export_openapi.py
 

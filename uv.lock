@@ -2668,6 +2668,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "pydantic-settings" },
     { name = "structlog" },
+    { name = "vexpath-core" },
 ]
 
 [package.metadata]
@@ -2675,6 +2676,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43.0" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "structlog", specifier = ">=24.4" },
+    { name = "vexpath-core", editable = "packages/core" },
 ]
 
 [[package]]

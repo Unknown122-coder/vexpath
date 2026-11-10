@@ -25,7 +25,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from vexpath_platform.apikeys import KEY_PREFIX, display_prefix, looks_like_key
+from vexpath_core.keyformat import KEY_PREFIX, display_prefix, looks_like_key
 
 #: Read before the stored file. CI sets this from a secret, and a stored file
 #: must not override it.

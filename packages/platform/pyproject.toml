@@ -8,6 +8,11 @@ license = "Apache-2.0"
 license-files = ["../../LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
+    # For the API key *format* only (vexpath_core.keyformat), which lives in
+    # the shared package so the command-line tool can recognise a key without
+    # depending on this server package. vexpath-db already depends on the
+    # core, so the core is the bottom layer either way.
+    "vexpath-core==0.0.1",
     # A webhook signing secret has to be recoverable to sign with, so it is
     # encrypted at rest rather than hashed (see secretbox.py).
     "cryptography>=43.0",

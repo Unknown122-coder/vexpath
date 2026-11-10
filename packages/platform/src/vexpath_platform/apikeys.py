@@ -34,18 +34,20 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-#: Prefix on every live key. Fixed and recognisable so secret scanners can
-#: match it, which is what gets a leaked key revoked before it is used.
-KEY_PREFIX = "vexpath_live_"
+# The *format* of a key lives in the shared package, because the command-line
+# tool has to recognise one and show a safe prefix of one, and it must not
+# depend on this server package to do it (see vexpath_core.keyformat).
+# Re-exported here so every server call site reads as it did before.
+from vexpath_core.keyformat import (
+    KEY_PREFIX,
+    VISIBLE_SUFFIX,
+    display_prefix,
+    looks_like_key,
+)
 
 #: Bytes of randomness in the secret. 256 bits: guessing is not a threat worth
 #: modelling at that size, which is what lets the hash be a plain one.
 TOKEN_BYTES = 32
-
-#: How much of the key is stored in the clear, so a dashboard can tell two
-#: keys apart. Short enough that it narrows nothing: the remainder is still
-#: 256 bits of search space.
-VISIBLE_SUFFIX = 6
 
 
 class ApiKeyError(Exception):
@@ -90,27 +92,6 @@ def issue() -> IssuedKey:
 def hash_key(secret: str) -> str:
     """The stored form of a key."""
     return hashlib.sha256(secret.strip().encode("utf-8")).hexdigest()
-
-
-def display_prefix(secret: str) -> str:
-    """What a dashboard shows beside a key.
-
-    The fixed prefix plus a few characters of the secret, which is enough to
-    tell two keys apart and not enough to help anyone guess one.
-    """
-    token = secret.strip().removeprefix(KEY_PREFIX)
-    return f"{KEY_PREFIX}{token[:VISIBLE_SUFFIX]}"
-
-
-def looks_like_key(value: str) -> bool:
-    """Whether a string is shaped like one of our keys.
-
-    Used to decide whether to attempt a lookup at all, not to decide whether a
-    key is valid. Rejecting an obviously wrong shape saves a database round
-    trip; it must never be the reason a real key is refused.
-    """
-    candidate = value.strip()
-    return candidate.startswith(KEY_PREFIX) and len(candidate) > len(KEY_PREFIX) + 10
 
 
 @dataclass(frozen=True, slots=True)

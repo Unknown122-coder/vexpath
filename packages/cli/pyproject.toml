@@ -7,11 +7,50 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["../../LICENSE"]
 authors = [{ name = "Akmal Khan" }]
+keywords = [
+    "security",
+    "sbom",
+    "vulnerability",
+    "reachability",
+    "sca",
+    "vex",
+    "openvex",
+    "cyclonedx",
+    "spdx",
+    "supply-chain",
+]
+# The PyPI page is where somebody decides whether to try this, so the
+# classifiers say what it is rather than only what it needs. "Development
+# Status :: 4 - Beta" is honest: the analysis is measured on real
+# repositories, and the hosted platform is new.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Software Distribution",
+    "Typing :: Typed",
+]
+
 dependencies = [
-    "vexpath-core",
+    "vexpath-core==0.0.1",
     "typer>=0.15",
     "rich>=13.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Unknown122-coder/vexpath"
+Documentation = "https://github.com/Unknown122-coder/vexpath/tree/main/docs"
+Repository = "https://github.com/Unknown122-coder/vexpath"
+Issues = "https://github.com/Unknown122-coder/vexpath/issues"
+Changelog = "https://github.com/Unknown122-coder/vexpath/releases"
 
 [project.scripts]
 vexpath = "vexpath.main:app"

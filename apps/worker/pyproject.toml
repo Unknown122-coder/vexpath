@@ -8,9 +8,9 @@ license = "Apache-2.0"
 license-files = ["../../LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
-    "vexpath-core",
-    "vexpath-db",
-    "vexpath-platform",
+    "vexpath-core==0.0.1",
+    "vexpath-db==0.0.1",
+    "vexpath-platform==0.0.1",
     "typer>=0.15",
 ]
 
