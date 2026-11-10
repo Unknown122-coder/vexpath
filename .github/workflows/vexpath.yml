@@ -50,6 +50,15 @@ jobs:
         # cleared.
         run: uv sync --all-packages
 
+      - name: Put the workspace's vexpath on PATH
+        # `uv sync --all-packages` has already installed every package,
+        # including the command line, so the Action is told not to install
+        # anything. Installing from a path instead would ask PyPI for
+        # `vexpath-core==<version>`, which does not exist until the first
+        # release -- which is exactly how the first run of this workflow
+        # failed.
+        run: echo "${PWD}/.venv/bin" >> "$GITHUB_PATH"
+
       - name: Restore the call-graph cache
         uses: actions/cache/restore@v4
         with:
@@ -64,9 +73,9 @@ jobs:
         id: vexpath
         uses: ./apps/action
         with:
-          # From this checkout rather than from PyPI: the point is to test
-          # what is in this commit, not what was released last week.
-          vexpath-version: path:packages/cli
+          # What this checkout just installed, rather than a release: the
+          # point is to test the code in this commit.
+          vexpath-version: none
           environment: .venv
           # Frozen snapshot, so a push does not fail because the corpus moved
           # between two runs of the same commit. The scheduled run below is

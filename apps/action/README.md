@@ -101,6 +101,20 @@ permissions:
 Uses the `gh` CLI that is already on every GitHub-hosted runner, with the
 job's own token. No third-party action, no credential of its own.
 
+## If you already have vexpath installed
+
+```yaml
+- run: uv sync          # or: pip install -e '.[dev]'
+- run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+- uses: Unknown122-coder/vexpath@v1
+  with:
+    vexpath-version: none
+```
+
+Use the one your project pins rather than a second copy. The step fails with a
+clear message if nothing is on PATH, because "command not found" three steps
+later explains nothing.
+
 ## Inputs
 
 | Input | Default | What it does |
@@ -120,7 +134,7 @@ job's own token. No third-party action, no credential of its own.
 | `upload` | `false` | Send the result to the platform. Needs `VEXPATH_API_KEY` and `project`. |
 | `project` | — | Project slug for the upload. |
 | `sign` | `false` | Sign the result with the workflow's own identity. Needs `id-token: write`. |
-| `vexpath-version` | pinned | A PyPI specifier, or `path:<dir>` to install from a checkout. |
+| `vexpath-version` | pinned | A PyPI specifier; `none` to use a vexpath already on PATH; or `path:<dir>[,<dir>...]` to install from a checkout. |
 | `working-directory` | `.` | Where the output files are written. |
 
 ## Outputs

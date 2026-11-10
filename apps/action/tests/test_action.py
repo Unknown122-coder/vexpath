@@ -130,9 +130,33 @@ def test_it_does_not_pull_in_another_action(action: dict[str, Any]) -> None:
 
 def test_the_cache_directory_is_asked_of_the_tool(action: dict[str, Any]) -> None:
     script = _scripts(action)
-    # Rather than hardcoded, so it cannot drift from
-    # vexpath_core.reach.cache.default_cache_directory.
-    assert "default_cache_directory" in script
+    # Asked of the command rather than hardcoded or guessed from the platform,
+    # so it cannot drift from where the cache actually lives -- and asked
+    # through `vexpath` rather than through an interpreter, because with
+    # vexpath-version 'none' the runner's python is not the one that has it.
+    assert "vexpath version --format json" in script
+    assert "cache_dir" in script
+    for guess in ("LOCALAPPDATA", "XDG_CACHE_HOME", ".cache/vexpath"):
+        assert guess not in script, guess
+
+
+def test_an_already_installed_vexpath_is_checked_rather_than_assumed(
+    action: dict[str, Any],
+) -> None:
+    script = _scripts(action)
+    # "command not found" three steps later explains nothing, so the 'none'
+    # form fails immediately with a message naming the input.
+    assert "command -v vexpath" in script
+    assert "vexpath-version is 'none'" in script
+
+
+def test_a_path_install_takes_more_than_one_directory(action: dict[str, Any]) -> None:
+    script = _scripts(action)
+    # A path install still resolves its dependencies from PyPI, so installing
+    # only the command line asks for a sibling version that may not be
+    # published. That is exactly how the first real run of this action failed.
+    assert "IFS=','" in script
+    assert 'python -m pip install --quiet --upgrade "${directories[@]}"' in script
 
 
 def test_every_shell_step_fails_on_an_error(action: dict[str, Any]) -> None:

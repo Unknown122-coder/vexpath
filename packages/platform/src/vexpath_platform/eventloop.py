@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 
 #: What to pass to ``uvicorn --loop``. One string, so the Makefile, the
 #: Dockerfile and the compose file cannot disagree about it.
@@ -71,7 +70,11 @@ def configure_event_loop() -> bool:
         kind of thing that is useful to see in a startup line when something
         later goes wrong with connections.
     """
-    if sys.platform != "win32":
+    # os.name, not sys.platform: a type checker special-cases the latter and
+    # narrows it to whichever platform it is running on, so one of the two
+    # branches is reported as dead code -- and which one depends on where the
+    # check runs. This failed on Linux after passing on Windows.
+    if os.name != "nt":
         return False
 
     policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)

@@ -301,7 +301,7 @@ users = Table(
     Column("email", Text(), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("last_seen_at", DateTime(timezone=True), nullable=True),
-    UniqueConstraint("provider", "provider_subject"),
+    UniqueConstraint("provider", "provider_subject", name="uq_users_provider_subject"),
 )
 
 
@@ -314,7 +314,7 @@ users_orgs = Table(
     Column("role", String(16), nullable=False, server_default="member"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     CheckConstraint("role IN ('owner', 'member')", name="ck_users_orgs_role"),
-    UniqueConstraint("org_id", "user_id"),
+    UniqueConstraint("org_id", "user_id", name="uq_users_orgs_org_user"),
 )
 
 
@@ -378,7 +378,7 @@ projects = Table(
     Column("settings", _Json, nullable=False, default=dict),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     CheckConstraint("visibility IN ('private', 'public')", name="ck_projects_visibility"),
-    UniqueConstraint("org_id", "slug"),
+    UniqueConstraint("org_id", "slug", name="uq_projects_org_slug"),
 )
 
 
@@ -444,7 +444,7 @@ components = Table(
     Column("licenses", _StringArray, nullable=False, default=list),
     Column("hashes", _Json, nullable=False, default=dict),
     CheckConstraint("scope IN ('runtime', 'dev', 'optional')", name="ck_components_scope"),
-    UniqueConstraint("sbom_id", "purl"),
+    UniqueConstraint("sbom_id", "purl", name="uq_components_sbom_purl"),
     Index("ix_components_lookup", "ecosystem", "name", "version"),
 )
 
@@ -467,7 +467,15 @@ component_edges = Table(
         ForeignKey("components.id", ondelete="CASCADE"),
         nullable=False,
     ),
-    UniqueConstraint("sbom_id", "parent_component_id", "child_component_id"),
+    # Named explicitly: the generated name would be 65 characters, past
+    # Postgres's 63-character identifier limit, and would be silently
+    # truncated into something no migration could refer to.
+    UniqueConstraint(
+        "sbom_id",
+        "parent_component_id",
+        "child_component_id",
+        name="uq_component_edges_triple",
+    ),
     Index("ix_component_edges_child", "child_component_id"),
 )
 
@@ -499,7 +507,9 @@ findings = Table(
     Column("notes", _StringArray, nullable=False, default=list),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     _check("verdict", Verdict, "verdict"),
-    UniqueConstraint("scan_id", "component_id", "advisory_id"),
+    UniqueConstraint(
+        "scan_id", "component_id", "advisory_id", name="uq_findings_scan_component_advisory"
+    ),
     Index("ix_findings_scan_verdict", "scan_id", "verdict"),
     Index("ix_findings_advisory", "advisory_id"),
 )

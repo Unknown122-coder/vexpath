@@ -115,9 +115,11 @@ inputs:
     default: "false"
   vexpath-version:
     description: >-
-      Which vexpath to install. A version specifier for PyPI, or "path:<dir>"
-      to install from a checkout, which is how this repository tests the action
-      against itself.
+      Which vexpath to install. Three forms: a version specifier for PyPI;
+      "none" to use a vexpath already on PATH, which is right when your
+      project has it in its dev dependencies; or "path:<dir>[,<dir>...]" to
+      install from a checkout, which needs every workspace package it pins,
+      because a path install still resolves its dependencies from PyPI.
     required: false
     default: ""
   working-directory:
@@ -179,22 +181,38 @@ runs:
         if [ -z "$spec" ]; then
           spec="vexpath==${pinned}"
         fi
+
         case "$spec" in
+          none)
+            # Already installed -- a project with vexpath in its dev
+            # dependencies, or a workspace checkout. Checked rather than
+            # assumed, because "command not found" three steps later explains
+            # nothing.
+            if ! command -v vexpath >/dev/null 2>&1; then
+              echo "::error::vexpath-version is 'none' but no vexpath is on PATH. Install it first, or remove the input."
+              exit 3
+            fi
+            ;;
           path:*)
-            # Installing from a checkout, which is how this repository tests
-            # the action against itself before a release exists.
-            python -m pip install --quiet --upgrade "${spec#path:}"
+            # One or more directories from a checkout, comma-separated. More
+            # than one is needed whenever the packages pin each other: a path
+            # install resolves its dependencies from PyPI like any other, so
+            # installing only the command line asks PyPI for a sibling version
+            # that may not be published yet.
+            paths="${spec#path:}"
+            IFS=',' read -r -a directories <<< "$paths"
+            python -m pip install --quiet --upgrade "${directories[@]}"
             ;;
           *)
             python -m pip install --quiet --upgrade "$spec"
             ;;
         esac
+
         vexpath version
-        # Asked of the tool rather than guessed, so the path cannot drift from
-        # vexpath_core.reach.cache.default_cache_directory. Named as an output
-        # so a caller can cache it: that is the difference between a
-        # twelve-second scan and a fourteen-minute one.
-        cache=$(python -c "from vexpath_core.reach.cache import default_cache_directory as d; print(d().parent)")
+        # Asked of the tool rather than guessed, and asked through the command
+        # rather than through an interpreter: with vexpath-version 'none' the
+        # runner's python is not the one that has it installed.
+        cache=$(vexpath version --format json | python -c "import json,sys; print(json.load(sys.stdin)['cache_dir'])")
         echo "cache-dir=${cache}" >> "$GITHUB_OUTPUT"
 
     - name: Scan

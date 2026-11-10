@@ -26,6 +26,7 @@ from vexpath.output import OutputFormat, emit, emit_json
 from vexpath_core import RESULTS_SCHEMA
 from vexpath_core import __version__ as core_version
 from vexpath_core.enums import NATIVE_LOCKFILE_ECOSYSTEMS, REACHABILITY_ECOSYSTEMS
+from vexpath_core.reach.cache import default_cache_directory
 from vexpath_core.sbom.lockfiles import LOCKFILE_PRIORITY
 
 app = typer.Typer(
@@ -86,6 +87,11 @@ def version(
         "native_lockfile_ecosystems": sorted(NATIVE_LOCKFILE_ECOSYSTEMS),
         "lockfiles": list(LOCKFILE_PRIORITY),
         "reachability_available": True,
+        # Where call graphs are cached. Reported here so a CI job can ask the
+        # tool rather than guess the platform convention: the difference
+        # between a warm scan and a cold one is minutes, and a cache keyed on
+        # the wrong directory silently never hits.
+        "cache_dir": str(default_cache_directory().parent),
     }
     if output is OutputFormat.JSON:
         emit_json(payload)
@@ -99,6 +105,8 @@ def version(
         f"matching        {payload['matching_ecosystems']}",
         f"lockfiles       {', '.join(LOCKFILE_PRIORITY)}",
         f"reachability    {', '.join(sorted(REACHABILITY_ECOSYSTEMS))}",
+        "",
+        f"graph cache     {payload['cache_dir']}",
     ]
     emit("\n".join(lines) + "\n")
 
