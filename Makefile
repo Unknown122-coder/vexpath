@@ -56,6 +56,9 @@ migration: ## Create a migration: make migration m="add findings table"
 regen-snapshot: ## Rebuild the frozen test advisory snapshot from tools/build_test_snapshot.py
 	$(UV) run python tools/build_test_snapshot.py
 
+openapi: ## Rewrite apps/api/openapi.json from the application's routes
+	$(UV) run python tools/export_openapi.py
+
 seed-advisories: ## Load the frozen test advisory snapshot into the local database
 	$(UV) run python -m vexpath_worker.main seed-advisories testdata/advisories
 

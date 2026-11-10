@@ -132,6 +132,16 @@ Permissions required: `contents: read`, `id-token: write` (signing), `security-e
 
 ## 3. REST API: `apps/api`
 
+The specification is committed at `apps/api/openapi.json` and regenerated with
+`make openapi`. Committed rather than only served, because a committed
+document turns an accidental breaking change into a diff somebody has to look
+at: a renamed field, a narrowed type or a dropped endpoint shows up in review,
+where it is cheap, instead of in a client's CI, where it is not. A test
+asserts the file equals what the application would serve, so it cannot drift.
+Only `/v1` is described — the HTML routes are excluded at the router, because
+a schema listing pages nobody calls programmatically makes the part people do
+call harder to read.
+
 Base URL `https://api.<domain>/v1`. JSON everywhere; problem details (RFC 9457) for errors. Authentication by `Authorization: Bearer vexpath_live_…` or session cookie. Rate limits: 60 requests/minute per key for writes, 600 for reads; unauthenticated badge and public endpoints are edge-cached.
 
 ### Projects and scans

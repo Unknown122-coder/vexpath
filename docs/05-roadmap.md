@@ -1002,8 +1002,26 @@ worth revisiting when there is a second instance.
 
 Twenty-two tests.
 
+### Done: the OpenAPI document, committed
+
+`apps/api/openapi.json`, regenerated with `make openapi`. Committed rather
+than only served, because a committed document turns an accidental breaking
+change into a diff somebody has to look at: a renamed field, a narrowed type
+or a dropped endpoint shows up in review, where it is cheap, rather than in a
+client's CI, where it is not. A test asserts the file equals what the
+application would serve, so it cannot drift, and the failure message says to
+run the exporter and read the diff.
+
+Serialised with sorted keys and a trailing newline, so a real change produces
+a diff of the change and not of a reordering. Only `/v1` is described: a
+schema listing pages nobody calls programmatically makes the part people do
+call harder to read. One test walks every response model for a field named
+like a credential, because the one response in a key's life that carries its
+secret comes from a page that is not in this schema — if such a field ever
+appears here, something is being returned that should not be.
+
 ### Remaining deliverables:
-- API (`/v1`): webhooks, OpenAPI spec committed.
+- API (`/v1`): webhooks.
 - HTML UI in the same app (ADR-0011): the rest of the dashboard — diff between scans, policy editor — plus a docs site. Sign-in, projects, publishing, API keys, the scan list, the finding detail with its path viewer, the public report page, package pages and the badge are done.
 - Structured logging, tracing, Sentry. Row-level security and rate limiting are done.
 - Deployed: one container on Fly.io or Render, plus Neon and R2; advisory sync on schedule.
