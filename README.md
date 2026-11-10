@@ -4,7 +4,7 @@ An open platform that turns a Software Bill of Materials (SBOM) into an honest a
 
 It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches every component against public advisory databases, then performs **reachability analysis**: it builds a call graph of the user's code and its dependencies, extracts the exact functions that each advisory's fix commit touched, and checks whether those functions are reachable from the application's entry points. The result is published as a signed **OpenVEX** document and an **in-toto attestation**, enforced in CI by a **policy engine**, and surfaced on a hosted web platform with public report pages, per-package vulnerability pages and a README badge.
 
-> Status: **M1 and M2 complete, M3 built** (2026-11-10). The scanner reads
+> Status: **M0–M4 complete, M5 in progress** (2026-11-10). The scanner reads
 > seven lockfile formats and both SBOM standards, matches against a
 > reproducible advisory corpus, and reports in table, JSON, Markdown and
 > SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
@@ -16,6 +16,38 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > unreachable, none of them unsoundly. Flask alone went from 38 findings to 10
 > worth looking at.** See [docs/05-roadmap.md](docs/05-roadmap.md) for the full
 > run and what limits it.
+>
+> The hosted platform is built: sign in with GitHub, projects, API keys, scan
+> upload, the finding page with its call-path viewer, the scan diff,
+> suppressions, webhooks, the policy editor, public report pages and the
+> badge — all server-rendered with **no JavaScript anywhere**, asserted by a
+> Playwright suite that drives the whole interface with script disabled. The
+> GitHub Action and the release pipeline are done. Not yet done: the live
+> deployment and the first published release, both of which need accounts
+> rather than code.
+
+## Documentation
+
+**Using it:** [quickstart](docs/guide/quickstart.md) ·
+[how reachability works](docs/guide/how-reachability-works.md) ·
+[limitations](docs/guide/limitations.md) ·
+[verifying attestations](docs/guide/verifying-attestations.md) ·
+[the GitHub Action](apps/action/README.md)
+
+**Running it:** [deployment](docs/09-deployment.md) ·
+[releasing](docs/10-release.md)
+
+**How it is built:** [architecture](docs/01-architecture.md) ·
+[data model](docs/02-data-model.md) ·
+[reachability design](docs/03-reachability-design.md) ·
+[API and CLI](docs/04-api-and-cli.md) ·
+[roadmap](docs/05-roadmap.md) ·
+[threat model](docs/06-threat-model.md) ·
+[standards](docs/07-standards.md) ·
+[decisions](docs/adr/)
+
+Start with [limitations](docs/guide/limitations.md) if you are deciding
+whether to trust it. It is the page that says what this does badly.
 >
 > The conclusions are publishable: `vexpath vex export` writes OpenVEX 0.2.0 or
 > CycloneDX VEX, `vexpath attest sign` wraps either in a signed in-toto
@@ -97,7 +129,7 @@ reports matching alone and says so in the output.
 ├── apps/
 │   ├── api/            FastAPI service: /v1 JSON API and the server-rendered HTML UI
 │   ├── worker/         Background jobs: advisory sync, patch diffing, call-graph builds
-│   └── action/         GitHub Action wrapping the CLI (M5)
+│   └── action/         GitHub Action wrapping the CLI
 ├── packages/
 │   ├── core/           The analysis library. Decides verdicts. No framework, no database.
 │   ├── platform/       Configuration and logging, shared by the API and the workers
@@ -105,7 +137,7 @@ reports matching alone and says so in the output.
 │   └── cli/            The `vexpath` command-line tool, built on core
 ├── infra/              Dockerfile, Docker Compose, Alembic config, deployment manifests
 ├── tools/              Developer scripts
-├── docs/               This blueprint
+├── docs/               Design documents, decisions, and docs/guide/ for users
 └── testdata/           Frozen advisory snapshot, fixture SBOMs, six fixture repositories
 ```
 

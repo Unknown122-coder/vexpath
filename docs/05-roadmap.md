@@ -1326,12 +1326,71 @@ rather than a project.
 
 ## M5 · GitHub Action, distribution, launch
 
-Deliverables:
-- `apps/action` published to the Marketplace; SARIF upload; PR comment with diff; keyless signing from the workflow identity.
-- `vexpath` on PyPI with a signed release (SLSA provenance via the official generator); Docker image on GHCR.
-- Dogfooding: this repository runs the Action on itself, and its README carries the badge.
-- Launch docs: quickstart, "how reachability works", "how to verify our attestations", limitations page including the per-ecosystem capability matrix.
-- Portfolio site entry linking to the public report of this very repository.
+### Done: the Action, the release pipeline, and the launch documentation
+
+Everything in M5 that does not need an account. What remains needs a PyPI
+project, a Marketplace listing and a deployed platform — accounts rather than
+code.
+
+**The Action** is a composite action, not a container one, and that decision
+is the feature. Reachability needs the caller's dependencies readable on disk;
+a container has its own filesystem where their virtual environment does not
+exist, so every finding would come back "package not analysed" and nothing
+could ever be cleared. It runs on the runner, in their checkout.
+
+It pulls in no other action. SARIF upload and caching are two lines in the
+caller's workflow, documented with their reasons — `if: always()` on the
+upload, because a failing gate would otherwise mean no alerts from the run the
+alerts are for. A supply-chain security tool that silently added three
+dependencies to somebody's build would be an odd thing to trust.
+
+The gate runs **last**, after the render, the summary, the comment, the
+signature and the upload, so a build that fails still has all of it.
+
+`vexpath report` came out of building it: the Action needs one scan three ways
+and three scans would be three answers, because a second analysis against a
+corpus that has moved reaches different verdicts. Its `--summary` prints the
+counts for a CI step, so what counts as "needs attention" is decided once
+rather than reimplemented in YAML.
+
+Sixteen tests over a thing that cannot be executed outside a runner — every
+output wired to a step that sets it, the pinned version matching the command
+line's own, every command the YAML invokes existing, every shell step failing
+on error — plus the repository scanning itself on every push, which is the
+only place the YAML actually runs.
+
+**Packaging found a broken wheel.** `uv build` worked; installing the result
+did not. The command line imported `vexpath_platform` for three constants and
+a published `vexpath` would have failed on install for everybody. Nothing in
+the suite could see it, because the suite runs inside the workspace where
+every package is installed. The format moved to `vexpath_core.keyformat`,
+`tools/verify_dist.py` now installs a wheel into an empty environment and runs
+it, and two tests guard the class of bug: every workspace import must be
+declared, and the layers must point one way.
+
+Inter-package dependencies are pinned to the exact version, because unbounded
+`pip install vexpath==0.0.1` could have resolved `vexpath-core==9.9.9`.
+
+**The release pipeline holds no token.** Trusted Publishing from a protected
+environment, SLSA provenance from the official generator run as its own
+reusable workflow, a tag that must match the version, and `skip-existing:
+false` so a version already on PyPI fails the release rather than silently
+doing nothing. A version is never republished: the verifier's own first run
+passed against a stale wheel at an unchanged version number, which is the same
+hazard a cache gives every user.
+
+**The launch documentation** is four pages written for somebody deciding
+whether to trust this: a quickstart, how reachability works including the five
+rules that each make it clear *fewer* findings, how to verify our attestations
+and ours about yours, and a limitations page with the per-ecosystem capability
+matrix. The README points at limitations first, deliberately — it is the page
+that says what this does badly.
+
+### Remaining, and each needs an account rather than code:
+- `apps/action` published to the Marketplace (needs the repository public and a release).
+- `vexpath` on PyPI, and the image on GHCR (needs the PyPI project with Trusted Publishing configured).
+- The badge in this README, pointing at this repository's own public report (needs the platform deployed).
+- Portfolio site entry linking to that report.
 
 Acceptance:
 - The Action runs on three external repositories (invite friends/colleagues) and their feedback is logged as issues.
