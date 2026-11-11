@@ -1,0 +1,33 @@
+#  What the image is allowed to see.
+#
+#  An allowlist rather than a list of things to leave out, because the
+#  expensive mistake here is the one you forget: .env sits in this directory
+#  with a database password in it, and a build context is uploaded to a
+#  builder machine whether or not any COPY line ever reads it. Starting from
+#  "nothing" means a new file is excluded until somebody says otherwise.
+#
+#  Keep this in step with infra/Dockerfile. If a COPY there fails with "file
+#  not found" and the file plainly exists, it is excluded here.
+
+*
+!pyproject.toml
+!uv.lock
+!packages
+!apps
+!infra
+!testdata
+
+# Caches and build output, which are large, machine-specific, and would
+# invalidate a layer on every build.
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/dist
+**/*.egg-info
+
+# Tests and fixtures do not ship in the image. The e2e suite in particular
+# pulls Playwright in, which has no business in a runtime image.
+**/tests

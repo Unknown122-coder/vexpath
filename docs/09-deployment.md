@@ -108,6 +108,26 @@ Then sign in once. If the GitHub callback URL is wrong, the sign-in page says
 so rather than failing silently; if the OAuth credentials are absent, it says
 sign-in is not configured.
 
+## The free allowance, and the five-minute machine
+
+A Fly account with no card on file is a **trial**: machines are stopped after
+five minutes, whatever `min_machines_running` says. The logs say so plainly —
+`Trial machine stopping. To run for longer than 5m0s` — and it is not a
+misconfiguration, so nothing in this repository can fix it.
+
+The deployment still works, because `auto_start_machines` is on: a request to
+a stopped machine starts it. The cost is a cold start on the first request
+after an idle period, measured here at **4.8 seconds**, and health checks that
+report nothing in between. Adding a card lifts the stop without being charged
+for this shape of deployment — one shared-cpu machine and a 3GB volume sit
+inside the free allowance.
+
+Which to pick depends on what the deployment is for. A demo somebody opens
+occasionally is fine with the cold start. Anything that is supposed to receive
+a webhook, or to look healthy to an uptime monitor, is not: the machine is
+stopped most of the time and a delivery to a stopped machine waits for it to
+boot.
+
 ## The advisory pipeline
 
 The corpus is what makes a clearance possible, and it is built by four jobs in

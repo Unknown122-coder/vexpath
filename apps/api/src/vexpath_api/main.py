@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp
 
 from vexpath_api import __version__
 from vexpath_api.oauth import IdentityProvider
@@ -69,14 +70,41 @@ SECURITY_HEADERS = {
     "Cross-Origin-Opener-Policy": "same-origin",
 }
 
+#: One year, subdomains included, and deliberately no ``preload``.
+#:
+#: Fly redirects http to https, but a redirect is only protection after the
+#: first request: the one that arrives over plain http has already been sent,
+#: and a session cookie or an API key in it is already gone. This header is
+#: what stops the browser making that request a second time.
+#:
+#: ``preload`` is left off because it is a submission to a list baked into
+#: browser binaries, and removal takes months. Claiming it in a header while
+#: not being on the list is a lie; being on it is a decision about every
+#: future subdomain, which is not one to take by default.
+STRICT_TRANSPORT_SECURITY = "max-age=31536000; includeSubDomains"
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Attach the security headers to every response."""
+    """Attach the security headers to every response.
+
+    Args:
+        hsts: Whether to send ``Strict-Transport-Security``. Off unless the
+            deployment is actually served over https, because a browser that
+            is told to pin ``localhost`` to https honours it for a year --
+            for every project on that machine, not just this one, and with no
+            obvious way back.
+    """
+
+    def __init__(self, app: ASGIApp, *, hsts: bool = False) -> None:
+        super().__init__(app)
+        self._hsts = hsts
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
         for header, value in SECURITY_HEADERS.items():
             response.headers.setdefault(header, value)
+        if self._hsts:
+            response.headers.setdefault("Strict-Transport-Security", STRICT_TRANSPORT_SECURITY)
         return response
 
 
@@ -138,7 +166,9 @@ def create_app(
     app.state.settings = resolved
     app.state.templates = build_templates(resolved)
     app.state.identity_provider = identity_provider
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(
+        SecurityHeadersMiddleware, hsts=resolved.base_url.startswith("https://")
+    )
     # Added after, so it runs before: Starlette applies middleware in
     # reverse order of registration, and a refusal should cost as little
     # as possible.

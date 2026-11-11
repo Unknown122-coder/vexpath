@@ -8,6 +8,7 @@ when a dependency is briefly unavailable.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response, status
@@ -70,6 +71,17 @@ async def healthz() -> HealthResponse:
     )
 
 
+#: How long the readiness probe may take to answer.
+#:
+#: Belt and braces over the connection timeout in ``vexpath_db.engine``: that
+#: one bounds *connecting*, and a server that accepts a connection and then
+#: never answers ``SELECT 1`` would still hang here. Shorter than the
+#: orchestrator's own check timeout (``infra/fly.toml`` says five seconds), so
+#: the probe gets to report "not ready" rather than being cut off and leaving
+#: the reason nowhere.
+PROBE_TIMEOUT_SECONDS = 3.0
+
+
 @router.get("/readyz", response_model=ReadinessResponse, summary="Readiness probe")
 async def readyz(
     response: Response,
@@ -89,8 +101,15 @@ async def readyz(
 
 async def _check_database(engine: AsyncEngine) -> DependencyStatus:
     try:
-        async with engine.connect() as connection:
-            await connection.execute(text("SELECT 1"))
+        async with asyncio.timeout(PROBE_TIMEOUT_SECONDS):
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+    except TimeoutError:
+        # Reported like any other failure, but named, because "it did not
+        # answer in time" and "it refused the connection" send an operator to
+        # different places.
+        log.warning("readiness.database_timeout", seconds=PROBE_TIMEOUT_SECONDS)
+        return DependencyStatus(name="database", ok=False, detail="TimeoutError")
     except Exception as exc:  # noqa: BLE001 - any failure means "not ready"
         # The exception type varies by driver and failure mode; the probe only
         # needs to report that the database is unreachable, with enough detail
