@@ -355,3 +355,48 @@ def test_the_container_health_check_does_not_depend_on_the_database() -> None:
     # is working fine.
     assert "/healthz" in healthcheck
     assert "/readyz" not in healthcheck
+
+
+def test_the_provenance_generator_can_describe_a_private_repository(
+    release: dict[str, Any],
+) -> None:
+    """Without this flag the generator refuses, and nothing gets published.
+
+    Its privacy check is right to exist: provenance is signed through
+    Sigstore and the signature goes into Rekor, a public append-only log, so
+    a private repository's name leaves it permanently. The flag acknowledges
+    that rather than disables it -- and the same facts are public anyway the
+    moment this workflow runs, because PyPI attestations name this owner,
+    repository and workflow file on the file page.
+
+    Checked because the failure is late and expensive: the publish jobs
+    depend on provenance, so a refusal here means a pushed tag that
+    published nothing.
+    """
+    with_ = release["jobs"]["provenance"]["with"]
+    assert with_["private-repository"] is True
+
+
+def test_the_image_build_sets_up_a_driver_that_supports_attestations(
+    release: dict[str, Any],
+) -> None:
+    """``provenance: true`` on an image needs the docker-container driver.
+
+    A runner's default buildx driver is ``docker``, which builds images and
+    cannot carry an attestation. It does not say so until there is a built
+    image to attach one to, so the failure arrives after the build and reads
+    as "buildx failed" rather than as a missing step.
+    """
+    steps = release["jobs"]["image"]["steps"]
+    uses = [step.get("uses", "") for step in steps]
+
+    build = next(i for i, u in enumerate(uses) if u.startswith("docker/build-push-action"))
+    wants_attestation = any(steps[build].get("with", {}).get(key) for key in ("provenance", "sbom"))
+    if not wants_attestation:
+        return
+
+    setup = next(
+        (i for i, u in enumerate(uses) if u.startswith("docker/setup-buildx-action")), None
+    )
+    assert setup is not None, "build-push asks for attestations with no buildx driver set up"
+    assert setup < build, "buildx has to be set up before the build that needs it"
