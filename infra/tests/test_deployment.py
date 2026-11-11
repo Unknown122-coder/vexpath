@@ -420,3 +420,45 @@ def test_every_job_that_attests_may_write_attestations(release: dict[str, Any]) 
         assert permissions.get("attestations") == "write", (
             f"job {name} attests something without attestations: write"
         )
+
+
+def test_every_worker_command_in_the_runbook_exists(runbook: str) -> None:
+    """The runbook is copied from, so a wrong flag there is a wrong command.
+
+    It had two. ``extract-symbols --limit 200`` -- the flag is ``--batch``,
+    so the scheduled job would have exited on a usage error every hour,
+    successfully doing nothing. And the daily sync omitted the snapshot
+    directory, so it would have written to the container's default path
+    instead of the volume, where the next step looks for it.
+
+    Checked by introspecting the CLI rather than by running it, so this stays
+    fast and still fails when a flag is renamed.
+    """
+    import re
+
+    import typer
+
+    from vexpath_worker.main import app
+
+    command = typer.main.get_command(app)
+    subcommands = getattr(command, "commands", None)
+    assert subcommands, "the worker CLI exposes no subcommands to check against"
+    known = {
+        name: {
+            option
+            for parameter in sub.params
+            for option in getattr(parameter, "opts", [])
+            if option.startswith("--")
+        }
+        for name, sub in subcommands.items()
+    }
+
+    invocations = re.findall(r"vexpath_worker\.main ([a-z-]+)((?: [^\n\"]*)?)", runbook)
+    assert invocations, "the runbook names no worker command at all"
+
+    for subcommand, rest in invocations:
+        assert subcommand in known, f"the runbook calls {subcommand}, which is not a command"
+        for flag in re.findall(r"--[a-z-]+", rest):
+            assert flag in known[subcommand], (
+                f"the runbook passes {flag} to {subcommand}, which does not accept it"
+            )

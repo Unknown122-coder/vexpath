@@ -61,17 +61,56 @@ def frozen_clock() -> object:
     return FixedClock(FROZEN_NOW)
 
 
-@pytest.fixture
-def integration_database_url() -> str:
-    """Connection string for tests that need a real Postgres.
+#: How long to wait for the integration database before giving up on it.
+#:
+#: Short on purpose. This is the "is it even there" probe, not a query: a
+#: developer who has not started the stack should be told so in two seconds.
+_PROBE_TIMEOUT = 2
 
-    Defaults to the docker compose database so that ``make up && make test-all``
-    works with no further setup.
+
+@pytest.fixture(scope="session")
+def _integration_database() -> str:
+    """Check once per session that Postgres is reachable, or skip everything.
+
+    Each test used to find this out for itself, which was fine until the
+    connection had a timeout: with the stack down, a suite of integration
+    tests spent that timeout per test and took tens of minutes to report
+    nothing. Probing once per session costs two seconds and then every
+    integration test skips immediately.
+
+    Session-scoped, so the cost is paid once however many tests ask for it.
     """
-    return os.environ.get(
+    from sqlalchemy import text
+
+    from vexpath_db.engine import create_sync_engine
+
+    url = os.environ.get(
         "VEXPATH_TEST_DATABASE_URL",
         "postgresql+psycopg://vexpath:vexpath@localhost:5432/vexpath",
     )
+    engine = create_sync_engine(url, connect_timeout=_PROBE_TIMEOUT)
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001 - any failure means "not available"
+        pytest.skip(
+            f"no integration database at {url.rsplit('@', 1)[-1]} "
+            f"({type(exc).__name__}). Start it with 'make up'."
+        )
+    finally:
+        engine.dispose()
+    return url
+
+
+@pytest.fixture
+def integration_database_url(_integration_database: str) -> str:
+    """Connection string for tests that need a real Postgres.
+
+    Defaults to the docker compose database so that ``make up && make test-all``
+    works with no further setup. Skips, rather than fails, when there is no
+    database to talk to -- see :func:`_integration_database`.
+    """
+    return _integration_database
 
 
 @pytest.fixture

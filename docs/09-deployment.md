@@ -190,7 +190,7 @@ easy to miss and invisible in a test.
 # Daily: download advisories and attach EPSS and KEV.
 fly machine run . -c infra/fly.toml --schedule daily --region sin \
   --volume vexpath_data:/data \
-  --command "python -m vexpath_worker.main sync-advisories --ecosystem PyPI"
+  --command "python -m vexpath_worker.main sync-advisories --ecosystem PyPI /data/advisories"
 
 # Daily, after the sync: refresh the two feeds in place.
 fly machine run . -c infra/fly.toml --schedule daily \
@@ -200,7 +200,7 @@ fly machine run . -c infra/fly.toml --schedule daily \
 # makes progress; the PyPI backlog is thousands of advisories.
 fly machine run . -c infra/fly.toml --schedule hourly \
   --volume vexpath_data:/data \
-  --command "python -m vexpath_worker.main extract-symbols --limit 200"
+  --command "python -m vexpath_worker.main extract-symbols --batch 200"
 
 # Daily, last: write the enriched corpus back out for the scanner to read.
 fly machine run . -c infra/fly.toml --schedule daily \
