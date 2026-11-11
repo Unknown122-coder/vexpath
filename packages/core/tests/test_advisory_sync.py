@@ -259,3 +259,45 @@ def test_two_osv_records_for_one_cve_collapse_to_one_advisory() -> None:
     collapsed = _collapse_aliases((advisory("https://github.com/psf/requests"), advisory(None)))
     assert len(collapsed) == 1
     assert collapsed[0].repo_url == "https://github.com/psf/requests"
+
+
+# --- Shipping a snapshot ---------------------------------------------------
+
+
+def test_a_gzipped_corpus_reads_identically(tmp_path: Path) -> None:
+    """The one step of the pipeline that crosses a network.
+
+    Symbol extraction takes hours, so it runs where there is time for it, and
+    the result is shipped to where the database is. The corpus is
+    newline-delimited JSON and compresses about six to one -- 62MB to 10MB for
+    PyPI with symbols -- which is the difference between a transfer that fits
+    in a five-minute machine window and one that does not.
+
+    Safe because the integrity hash covers the normalised records rather than
+    the bytes of the file, so compressing cannot change it. Asserted here
+    rather than assumed, since a silent hash change would read as corruption.
+    """
+    import gzip
+
+    archives = {"PyPI": _archive([_record("CVE-2026-0001", name="requests", ecosystem="PyPI")])}
+    with _client(archives) as client:
+        sync(tmp_path, ecosystems=["PyPI"], client=client, snapshot_id="s1")
+
+    plain_metadata, plain_records = read_snapshot(tmp_path)
+
+    source = tmp_path / "advisories.jsonl"
+    (tmp_path / "advisories.jsonl.gz").write_bytes(gzip.compress(source.read_bytes()))
+    source.unlink()
+
+    metadata, records = read_snapshot(tmp_path)
+
+    assert metadata.content_sha256 == plain_metadata.content_sha256
+    assert [record.id for record in records] == [record.id for record in plain_records]
+
+
+def test_a_directory_with_neither_corpus_file_says_so(tmp_path: Path) -> None:
+    import re
+
+    (tmp_path / "snapshot.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match=re.escape("advisories.jsonl.gz")):
+        read_snapshot(tmp_path)

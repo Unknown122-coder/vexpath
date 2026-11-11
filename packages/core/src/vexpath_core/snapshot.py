@@ -25,6 +25,7 @@ On-disk layout of a snapshot directory::
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from collections.abc import Iterable, Sequence
@@ -36,6 +37,16 @@ from vexpath_core.models.advisory import Advisory, AdvisorySnapshot
 
 SNAPSHOT_METADATA_FILE = "snapshot.json"
 ADVISORIES_FILE = "advisories.jsonl"
+
+#: The same file, compressed. Read if the plain one is absent.
+#:
+#: The corpus is newline-delimited JSON, which compresses about eight to one:
+#: the PyPI corpus with symbols is 60MB plain and under 8MB gzipped. That
+#: matters for the one step of the pipeline that crosses a network -- extract
+#: where there is time to extract, then ship the snapshot to where the
+#: database is -- and it matters most on a host that stops a machine after
+#: five minutes.
+ADVISORIES_FILE_GZ = "advisories.jsonl.gz"
 
 #: Excluded from an advisory's source hash. See the module docstring.
 _VOLATILE_FIELDS = frozenset(
@@ -126,16 +137,25 @@ def read_snapshot(
         SnapshotIntegrityError: if verification fails.
     """
     metadata_path = directory / SNAPSHOT_METADATA_FILE
-    advisories_path = directory / ADVISORIES_FILE
-    for path in (metadata_path, advisories_path):
-        if not path.is_file():
-            msg = f"not a snapshot directory, {path.name} is missing: {directory}"
-            raise FileNotFoundError(msg)
+    if not metadata_path.is_file():
+        msg = f"not a snapshot directory, {SNAPSHOT_METADATA_FILE} is missing: {directory}"
+        raise FileNotFoundError(msg)
+
+    plain = directory / ADVISORIES_FILE
+    compressed = directory / ADVISORIES_FILE_GZ
+    advisories_path = plain if plain.is_file() else compressed
+    if not advisories_path.is_file():
+        msg = (
+            f"not a snapshot directory, neither {ADVISORIES_FILE} nor "
+            f"{ADVISORIES_FILE_GZ} is present: {directory}"
+        )
+        raise FileNotFoundError(msg)
 
     metadata = AdvisorySnapshot.model_validate_json(metadata_path.read_text(encoding="utf-8"))
 
     advisories: list[Advisory] = []
-    with advisories_path.open(encoding="utf-8") as handle:
+    opener = gzip.open if advisories_path == compressed else open
+    with opener(advisories_path, mode="rt", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             stripped = line.strip()
             if not stripped:
