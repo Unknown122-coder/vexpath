@@ -400,3 +400,23 @@ def test_the_image_build_sets_up_a_driver_that_supports_attestations(
     )
     assert setup is not None, "build-push asks for attestations with no buildx driver set up"
     assert setup < build, "buildx has to be set up before the build that needs it"
+
+
+def test_every_job_that_attests_may_write_attestations(release: dict[str, Any]) -> None:
+    """``attestations: write`` is easy to omit and fails late.
+
+    The attest action persists its statement to this repository through the
+    attestations API. Without the permission the build runs, the image is
+    pushed, and only then does the attest step fail -- with "Resource not
+    accessible by integration", which names no permission and sends you
+    looking at registry credentials instead. That cost one release's image
+    attestation, so it is asserted rather than remembered.
+    """
+    for name, job in release["jobs"].items():
+        steps = job.get("steps") or []
+        if not any(str(step.get("uses", "")).startswith("actions/attest") for step in steps):
+            continue
+        permissions = job.get("permissions") or {}
+        assert permissions.get("attestations") == "write", (
+            f"job {name} attests something without attestations: write"
+        )

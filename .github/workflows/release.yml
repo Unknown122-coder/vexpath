@@ -215,6 +215,12 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      # actions/attest-build-provenance persists the attestation to this
+      # repository through the attestations API, which is a write and needs
+      # saying so. Without it the image builds, pushes, and then the attest
+      # step fails with "Resource not accessible by integration" -- a
+      # permissions error whose message names no permission.
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
