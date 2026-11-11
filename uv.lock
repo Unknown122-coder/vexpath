@@ -2548,7 +2548,7 @@ wheels = [
 
 [[package]]
 name = "vexpath"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "rich" },
@@ -2565,7 +2565,7 @@ requires-dist = [
 
 [[package]]
 name = "vexpath-api"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "apps/api" }
 dependencies = [
     { name = "fastapi" },
@@ -2597,7 +2597,7 @@ provides-extras = ["sentry"]
 
 [[package]]
 name = "vexpath-core"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "cel-python" },
@@ -2643,7 +2643,7 @@ provides-extras = ["spdx", "sigstore"]
 
 [[package]]
 name = "vexpath-db"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/db" }
 dependencies = [
     { name = "alembic" },
@@ -2662,7 +2662,7 @@ requires-dist = [
 
 [[package]]
 name = "vexpath-platform"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/platform" }
 dependencies = [
     { name = "cryptography" },
@@ -2681,7 +2681,7 @@ requires-dist = [
 
 [[package]]
 name = "vexpath-worker"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "apps/worker" }
 dependencies = [
     { name = "typer" },

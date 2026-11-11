@@ -1,6 +1,6 @@
 [project]
 name = "vexpath-db"
-version = "0.1.0"
+version = "0.1.1"
 description = "Database schema, engine helpers and migrations shared by the API and the workers."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,7 +13,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
-    "vexpath-core==0.1.0",
+    "vexpath-core==0.1.1",
     "sqlalchemy[asyncio]>=2.0.36",
     "psycopg[binary]>=3.2",
     "alembic>=1.14",

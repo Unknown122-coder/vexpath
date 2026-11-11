@@ -94,6 +94,24 @@ def _regenerate_openapi() -> bool:
     document fails the release pipeline either way and the message here is
     the clearer one.
     """
+    # Re-install the workspace first. The exporter reads the API version from
+    # installed package metadata, so until the environment is re-synced it
+    # reports the version this tool has just replaced: the file is rewritten
+    # with the old number, the check below says the document disagrees, and
+    # the release pipeline fails on a stale document for a reason that looks
+    # like nothing to do with the bump. That happened on the first release.
+    sync = subprocess.run(
+        ["uv", "sync", "--quiet"],  # noqa: S607 - uv is required to work here at all
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(ROOT),
+    )
+    if sync.returncode != 0:
+        print(sync.stderr, file=sys.stderr)
+        msg = "the workspace could not be re-synced, so the version would not be picked up"
+        raise SystemExit(msg)
+
     exporter = ROOT / "tools" / "export_openapi.py"
     result = subprocess.run(  # noqa: S603 - a fixed command, built here
         [sys.executable, str(exporter)],
@@ -162,7 +180,11 @@ def main() -> int:
         return 1
 
     print(f"\nevery package, every pin and the Action are at {version}")
-    print(f"next: make dist, then  git tag -s v{version} -m v{version}")
+    # -a, not -s. A signed tag needs a signing key configured, and git
+    # refuses with "failed to write commit object" rather than saying so.
+    # The release is attested by provenance from CI, which is a stronger
+    # claim than a tag signature and does not depend on one laptop.
+    print(f"next: make dist, then  git tag -a v{version} -m v{version}")
     return 0
 
 
