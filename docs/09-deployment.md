@@ -108,6 +108,41 @@ Then sign in once. If the GitHub callback URL is wrong, the sign-in page says
 so rather than failing silently; if the OAuth credentials are absent, it says
 sign-in is not configured.
 
+## Loading the corpus for the first time
+
+A fresh deployment has an empty database, which is a working deployment with
+nothing to say: the package pages render and find no advisories. The corpus is
+one command, and these are its measured numbers rather than estimates
+(2026-11-11, PyPI only):
+
+| | |
+|---|---|
+| Advisories | 19,575 |
+| Download | 19 seconds |
+| Snapshot on disk | 48 MB of JSONL |
+| EPSS coverage | 99.2% |
+| In CISA KEV | 22 |
+
+```sh
+fly ssh console -c infra/fly.toml -C   "python -m vexpath_worker.main sync-advisories --ecosystem PyPI /data/advisories"
+```
+
+Run it on the app machine, which already has the database URL and the volume
+mounted; it does not need its own machine.
+
+**Watch the storage.** Neon's free plan allows 0.5GB, and 48MB of JSONL
+becomes several times that as rows with indexes. One ecosystem fits
+comfortably; PyPI and npm together, with extracted symbols, will not, and
+Neon stops accepting writes rather than billing. Check with
+`SELECT pg_size_pretty(pg_database_size(current_database()))` before adding
+an ecosystem, not after.
+
+Symbol extraction is the slow one and the only part that wants a GitHub
+token: it clones fix commits and diffs them, thousands of advisories deep,
+and it is resumable precisely because no single run finishes. Until it has
+run, every scan reports `reach.analysed = false` — "nobody looked", which is
+deliberately not the same answer as "not reachable".
+
 ## The free allowance, and the five-minute machine
 
 A Fly account with no card on file is a **trial**: machines are stopped after
