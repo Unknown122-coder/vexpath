@@ -55,6 +55,15 @@ class ReadinessResponse(BaseModel):
     dependencies: list[DependencyStatus]
 
 
+# HEAD as well as GET, because FastAPI does not add it the way Starlette's
+# own router does, and uptime monitors send it: a probe answering 405 is a
+# probe reporting the service down while the service is fine.
+#
+# A second registration rather than ``methods=["GET", "HEAD"]``, which gives
+# both operations the same operation id and makes the generated OpenAPI
+# document carry a duplicate. Kept out of the schema because a HEAD that
+# mirrors a documented GET exactly is noise in a document people read.
+@router.head("/healthz", include_in_schema=False)
 @router.get("/healthz", response_model=HealthResponse, summary="Liveness probe")
 async def healthz() -> HealthResponse:
     """Report that the process is alive.
@@ -82,6 +91,7 @@ async def healthz() -> HealthResponse:
 PROBE_TIMEOUT_SECONDS = 3.0
 
 
+@router.head("/readyz", include_in_schema=False)
 @router.get("/readyz", response_model=ReadinessResponse, summary="Readiness probe")
 async def readyz(
     response: Response,

@@ -166,9 +166,7 @@ def create_app(
     app.state.settings = resolved
     app.state.templates = build_templates(resolved)
     app.state.identity_provider = identity_provider
-    app.add_middleware(
-        SecurityHeadersMiddleware, hsts=resolved.base_url.startswith("https://")
-    )
+    app.add_middleware(SecurityHeadersMiddleware, hsts=resolved.base_url.startswith("https://"))
     # Added after, so it runs before: Starlette applies middleware in
     # reverse order of registration, and a refusal should cost as little
     # as possible.

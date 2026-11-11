@@ -123,3 +123,17 @@ def test_readiness_answers_within_its_own_timeout(client: TestClient) -> None:
     assert response.status_code == 503
     assert response.json()["dependencies"][0]["ok"] is False
     assert elapsed < 8, f"the readiness probe took {elapsed:.0f}s to say no"
+
+
+@pytest.mark.parametrize("path", ["/healthz", "/readyz"])
+def test_the_probes_answer_a_head_request(client: TestClient, path: str) -> None:
+    """Uptime monitors send HEAD, and FastAPI does not add it for free.
+
+    Starlette's own router adds HEAD to any route that allows GET; FastAPI's
+    does not. So the probes answered 405, which a monitor reports as the
+    service being down while the service is perfectly healthy.
+    """
+    response = client.head(path)
+    assert response.status_code in (200, 503), response.status_code
+    # A HEAD response carries no body, which is the server's job, not ours.
+    assert response.content == b""
