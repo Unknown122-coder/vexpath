@@ -111,15 +111,18 @@ sign-in is not configured.
 ## Loading the corpus for the first time
 
 A fresh deployment has an empty database, which is a working deployment with
-nothing to say: the package pages render and find no advisories. The corpus is
-one command, and these are its measured numbers rather than estimates
-(2026-11-11, PyPI only):
+nothing to say. The corpus is one command, and these are measurements of the
+real thing rather than estimates (2026-11-11, PyPI only, loaded from a Fly
+machine in `sin` into Neon in `ap-southeast-1`):
 
 | | |
 |---|---|
 | Advisories | 19,575 |
+| Affected packages | 21,176 |
 | Download | 19 seconds |
+| Load | 19 seconds |
 | Snapshot on disk | 48 MB of JSONL |
+| In the database | 60 MB |
 | EPSS coverage | 99.2% |
 | In CISA KEV | 22 |
 
@@ -130,18 +133,31 @@ fly ssh console -c infra/fly.toml -C   "python -m vexpath_worker.main sync-advis
 Run it on the app machine, which already has the database URL and the volume
 mounted; it does not need its own machine.
 
-**Watch the storage.** Neon's free plan allows 0.5GB, and 48MB of JSONL
-becomes several times that as rows with indexes. One ecosystem fits
-comfortably; PyPI and npm together, with extracted symbols, will not, and
-Neon stops accepting writes rather than billing. Check with
-`SELECT pg_size_pretty(pg_database_size(current_database()))` before adding
-an ecosystem, not after.
+**Watch the storage, but it is roomier than it looks.** 48MB of JSONL became
+60MB of rows and indexes, against Neon's free 0.5GB: one ecosystem costs
+about an eighth of the allowance. npm is roughly four times the size of PyPI,
+and extracted symbols add rows per advisory rather than per package, so there
+is room for both and not for carelessness. Neon stops accepting writes rather
+than billing, so check before adding an ecosystem rather than after:
 
-Symbol extraction is the slow one and the only part that wants a GitHub
-token: it clones fix commits and diffs them, thousands of advisories deep,
-and it is resumable precisely because no single run finishes. Until it has
-run, every scan reports `reach.analysed = false` — "nobody looked", which is
-deliberately not the same answer as "not reachable".
+```sh
+SELECT pg_size_pretty(pg_database_size(current_database()));
+```
+
+Symbol extraction is the slow one, and until it has run the public package
+pages say so in as many words: "No advisory affecting *x* has had its symbols
+extracted into this corpus." Loading advisories is not enough to make those
+pages show anything, which is worth knowing before concluding that a fresh
+load failed.
+
+It is also the only part that genuinely needs a GitHub token. It clones fix
+commits and diffs them, thousands of advisories deep, and unauthenticated
+GitHub allows sixty requests an hour -- enough to prove the job runs and not
+enough to get through the corpus. It is resumable precisely because no single
+run finishes.
+
+Until it has run, every scan reports `reach.analysed = false` -- "nobody
+looked", which is deliberately not the same answer as "not reachable".
 
 ## The free allowance, and the five-minute machine
 
