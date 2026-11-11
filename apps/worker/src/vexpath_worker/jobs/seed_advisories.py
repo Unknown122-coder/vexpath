@@ -8,10 +8,19 @@ The job is idempotent: an advisory's child rows are replaced wholesale rather
 than merged, so running it twice leaves exactly the same state. That matters
 because the real ``advisory.sync`` job (M1) uses this same write path and will
 be retried.
+
+It writes in batches, and that is not an optimisation for its own sake. One
+statement per advisory meant four round trips each -- an upsert, two deletes
+and an insert -- which is 78,000 round trips for the 19,575 advisories PyPI
+actually has. Written that way the first production load did not finish in the
+four and a half minutes it was given, against a database in the same region.
+In batches the same corpus is a few hundred statements. Every one of those
+round trips was latency that the size of the corpus has nothing to do with.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,21 +54,39 @@ class SeedReport:
         )
 
 
+#: Advisories per round trip.
+#:
+#: Big enough that a statement's latency stops dominating, small enough that
+#: one statement's parameters stay a sane size: an advisory carries its details
+#: text, its references and up to two CVSS documents, so five hundred of them
+#: is already megabytes of bound parameters.
+BATCH_SIZE = 500
+
+
 def seed_snapshot(engine: Engine, directory: Path) -> SeedReport:
     """Load the snapshot in ``directory`` into the database.
 
     Everything happens in one transaction, so a failure part-way leaves the
-    advisory corpus as it was rather than half-updated.
+    advisory corpus as it was rather than half-updated. The price of that
+    choice is that the whole load must fit inside however long the host lets a
+    process run, which is what :data:`BATCH_SIZE` is for.
 
     Raises:
         FileNotFoundError: if the directory is not a snapshot.
         SnapshotIntegrityError: if the snapshot's hash does not match contents.
     """
     metadata, records = read_snapshot(directory)
+
+    # Last occurrence wins, which is what the row-at-a-time loop did when a
+    # snapshot named one advisory twice. Deduplicating is required rather than
+    # tidy: ON CONFLICT DO UPDATE refuses to touch the same row twice within
+    # one statement, so a duplicate inside a batch would fail the whole load.
+    unique = {advisory.id: advisory for advisory in records}
     log.info(
         "seed.start",
         snapshot_id=metadata.id,
-        advisories=len(records),
+        advisories=len(unique),
+        duplicates=len(records) - len(unique),
         directory=str(directory),
     )
 
@@ -67,16 +94,17 @@ def seed_snapshot(engine: Engine, directory: Path) -> SeedReport:
     symbol_rows = 0
 
     with engine.begin() as connection:
-        for advisory in records:
-            connection.execute(_advisory_upsert(advisory))
+        for batch in _batched(list(unique.values()), BATCH_SIZE):
+            ids = [advisory.id for advisory in batch]
+            connection.execute(_advisory_upsert(batch))
 
             # Replace rather than merge: an advisory's affected ranges and
             # symbols are a single fact that the source owns completely.
             connection.execute(
-                delete(advisory_affected).where(advisory_affected.c.advisory_id == advisory.id)
+                delete(advisory_affected).where(advisory_affected.c.advisory_id.in_(ids))
             )
             connection.execute(
-                delete(vulnerable_symbols).where(vulnerable_symbols.c.advisory_id == advisory.id)
+                delete(vulnerable_symbols).where(vulnerable_symbols.c.advisory_id.in_(ids))
             )
 
             affected_values = [
@@ -90,6 +118,7 @@ def seed_snapshot(engine: Engine, directory: Path) -> SeedReport:
                     "versions": list(package.versions),
                     "fixed_versions": list(package.fixed_versions),
                 }
+                for advisory in batch
                 for package in advisory.affected
             ]
             if affected_values:
@@ -109,6 +138,7 @@ def seed_snapshot(engine: Engine, directory: Path) -> SeedReport:
                     "file_path": symbol.file_path,
                     "fix_commit": symbol.fix_commit,
                 }
+                for advisory in batch
                 for symbol in advisory.symbols
             ]
             if symbol_values:
@@ -135,7 +165,7 @@ def seed_snapshot(engine: Engine, directory: Path) -> SeedReport:
     report = SeedReport(
         snapshot_id=metadata.id,
         content_sha256=metadata.content_sha256,
-        advisories=len(records),
+        advisories=len(unique),
         affected_packages=affected_rows,
         symbols=symbol_rows,
     )
@@ -143,9 +173,30 @@ def seed_snapshot(engine: Engine, directory: Path) -> SeedReport:
     return report
 
 
-def _advisory_upsert(advisory: Advisory) -> PgInsert:
-    """Build the upsert statement for one advisory row."""
-    values = {
+def _batched(items: list[Advisory], size: int) -> Iterator[list[Advisory]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def _advisory_upsert(batch: Sequence[Advisory]) -> PgInsert:
+    """Build one upsert statement covering every advisory in ``batch``."""
+    statement = pg_insert(advisories).values([_advisory_values(a) for a in batch])
+    # ``excluded`` is the row the insert proposed. A multi-row upsert has to
+    # say it that way: naming the values directly would update every
+    # conflicting row to whichever advisory came last in the batch.
+    return statement.on_conflict_do_update(
+        index_elements=[advisories.c.id],
+        set_={
+            column.name: statement.excluded[column.name]
+            for column in advisories.columns
+            if column.name != "id"
+        },
+    )
+
+
+def _advisory_values(advisory: Advisory) -> dict[str, object]:
+    """The row for one advisory."""
+    return {
         "id": advisory.id,
         "aliases": list(advisory.aliases),
         "summary": advisory.summary,
@@ -166,11 +217,6 @@ def _advisory_upsert(advisory: Advisory) -> PgInsert:
         "symbols_status": advisory.symbols_status.value,
         "source_sha256": advisory.source_sha256,
     }
-    statement = pg_insert(advisories).values(**values)
-    return statement.on_conflict_do_update(
-        index_elements=[advisories.c.id],
-        set_={key: value for key, value in values.items() if key != "id"},
-    )
 
 
 __all__ = ["SeedReport", "seed_snapshot"]

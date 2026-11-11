@@ -105,3 +105,48 @@ def test_affected_ranges_survive_the_round_trip(engine: Engine, snapshot_dir: Pa
     assert ranges[0]["type"] == "ECOSYSTEM"
     assert {event.get("fixed") for event in ranges[0]["events"]} == {None, "2.32.0"}
     assert fixed_versions == ["2.32.0"]
+
+
+def test_the_load_is_batched_not_row_at_a_time(engine: Engine, snapshot_dir: Path) -> None:
+    """The statement count must follow the batches, not the advisories.
+
+    This started as a production failure rather than a preference. One
+    statement per advisory is four round trips each -- upsert, two deletes,
+    insert -- and PyPI has 19,575 advisories, so the first real load issued on
+    the order of 78,000 statements and was still going when the host stopped
+    the machine four and a half minutes in. The corpus is 48MB; none of that
+    time was the data.
+
+    Asserted by counting, because the symptom of losing it is slowness, and
+    slowness in a loader nobody watches is invisible until it runs against a
+    real corpus.
+    """
+    from sqlalchemy import event
+
+    from vexpath_worker.jobs.seed_advisories import BATCH_SIZE
+
+    executed: list[str] = []
+
+    def record(
+        conn: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        executed.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        report = seed_snapshot(engine, snapshot_dir)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    batches = -(-report.advisories // BATCH_SIZE)
+    # Per batch: one upsert, two deletes, and one insert for each child table.
+    # Plus one for the snapshot row itself.
+    assert len(executed) <= batches * 5 + 1, (
+        f"{report.advisories} advisories took {len(executed)} statements in "
+        f"{batches} batch(es); the loader has gone back to row-at-a-time"
+    )
