@@ -258,6 +258,20 @@ jobs:
           sbom: true
 
       - name: Attest the image
+        # Only when the repository is public. GitHub's attestation API is not
+        # available for user-owned private repositories at all -- it answers
+        # "Feature not available for user-owned private repositories", which
+        # no permission fixes -- so with the repository private this step can
+        # only ever fail, and a job that is always red is a job nobody reads.
+        #
+        # Not continue-on-error: that hides a real failure once the
+        # repository is public. The condition turns itself off instead, so
+        # going public starts attesting with no change here.
+        #
+        # The image is not unattested meanwhile: buildx attaches its own
+        # provenance and SBOM to the manifest above, in the registry. What is
+        # missing is the copy GitHub would hold.
+        if: ${{ github.event.repository.visibility == 'public' }}
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ghcr.io/${{ github.repository }}
