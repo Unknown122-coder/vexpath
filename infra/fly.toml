@@ -11,7 +11,12 @@
 #  an image layer.
 
 app = "vexpath"
-primary_region = "lhr"
+# Next to the database, not next to the author. Every request makes several
+# round trips to Postgres -- authentication, the tenant context, the query --
+# so a hundred milliseconds between the app and the database is a hundred
+# milliseconds several times over on every page. The Neon project is in
+# ap-southeast-1, so this is Singapore. Move both together or neither.
+primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"
@@ -29,7 +34,11 @@ primary_region = "lhr"
 [env]
   VEXPATH_ENV = "production"
   VEXPATH_LOG_FORMAT = "json"
-  VEXPATH_BASE_URL = "https://vexpath.dev"
+  # The hostname Fly gives the app, over HTTPS -- which the production
+  # check requires, because the session cookie is Secure and a browser
+  # would never send it back over plain HTTP. A custom domain is a change
+  # here and in the OAuth app's callback URL, nowhere else.
+  VEXPATH_BASE_URL = "https://vexpath.fly.dev"
   # Fly terminates TLS at its edge and sets X-Forwarded-For, so the proxy
   # headers can be believed here -- and only here. Off by default, because
   # believing that header without a proxy in front lets a caller evade their
@@ -37,7 +46,9 @@ primary_region = "lhr"
   # their address.
   VEXPATH_TRUST_PROXY_HEADERS = "true"
   VEXPATH_RATE_LIMIT_ENABLED = "true"
-  # The snapshot the scanner reads, written by the export job onto the volume.
+  # Where the export job writes the enriched corpus and the scanner reads it.
+  # Set for the whole app because the scheduled worker machines share this
+  # configuration; the API itself never reads it.
   VEXPATH_ADVISORY_SNAPSHOT_DIR = "/data/advisories"
 
 [http_service]

@@ -1,8 +1,8 @@
 # 09 · Deployment
 
 One container image, three things it can be: the API and HTML UI, the advisory
-pipeline on a schedule, and the migration runner. Postgres is managed (Neon),
-object storage is S3-compatible (Cloudflare R2), and nothing else is required.
+pipeline on a schedule, and the migration runner. Managed Postgres (Neon) is
+the only dependency that has to exist.
 
 This document is the runbook. It is written so that somebody who has never
 deployed this can do it, and so that somebody who has can tell whether it is
@@ -10,13 +10,35 @@ healthy.
 
 ## What has to exist first
 
+**To serve at all**, two things:
+
 | Thing | Why |
 |---|---|
 | A Fly.io account and `flyctl` | The host. Render works the same way; the `fly.toml` here is the one that is maintained. |
 | A Neon Postgres database | Everything structured, including the job queue (ADR-0003). |
-| A Cloudflare R2 bucket | SBOMs, VEX documents and attestations. |
-| A GitHub OAuth app | Sign-in. Callback URL **must** be `<base-url>/auth/github/callback`. |
-| A GitHub token (classic, no scopes) | Raises the API rate limit for patch diffing. Optional but the extraction crawl is slow without it. |
+
+**To let anybody sign in**, one more:
+
+| Thing | Why |
+|---|---|
+| A GitHub OAuth app | Callback URL **must** be `<base-url>/auth/github/callback`. Without it the deployment serves every public page and the sign-in page says it is not configured, which is a usable state to deploy in. |
+
+**Not yet needed**, despite having settings:
+
+| Thing | Why not |
+|---|---|
+| A Cloudflare R2 bucket | `VEXPATH_S3_*` exists in the configuration and **nothing reads it**: no artefact is written to object storage yet. Create it when something does, not before. |
+| A GitHub token | Only raises the API rate limit for the advisory pipeline's patch diffing. The extraction crawl is slower without one and works. |
+
+Put the Fly app in the **same region as the database**. Every request makes
+several round trips to Postgres, so the distance between them is paid
+repeatedly on every page. `fly.toml` says `sin` because the Neon project is in
+`ap-southeast-1`; if you move one, move both.
+
+Fly app names are globally unique. If `vexpath` is taken, pick another, and
+change both `app` in `fly.toml` and `VEXPATH_BASE_URL` to match — the base URL
+is what the session cookie and the OAuth callback are built from, so a
+mismatch there means sign-in silently never completes.
 
 ## Secrets
 
@@ -26,17 +48,20 @@ outside local development: a missing secret fails at start-up rather than
 falling back to something insecure.
 
 ```sh
+# The two that are actually required.
 fly secrets set \
   VEXPATH_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
-  VEXPATH_DATABASE_URL='postgresql+psycopg://…neon.tech/vexpath?sslmode=require' \
-  VEXPATH_GITHUB_CLIENT_ID=… \
-  VEXPATH_GITHUB_CLIENT_SECRET=… \
-  VEXPATH_GITHUB_TOKEN=… \
-  VEXPATH_S3_ENDPOINT_URL='https://<account>.r2.cloudflarestorage.com' \
-  VEXPATH_S3_ACCESS_KEY_ID=… \
-  VEXPATH_S3_SECRET_ACCESS_KEY=… \
-  VEXPATH_SENTRY_DSN=…   # optional
+  VEXPATH_DATABASE_URL='postgresql://…neon.tech/neondb?sslmode=require'
+
+# When you want sign-in to work.
+fly secrets set VEXPATH_GITHUB_CLIENT_ID=… VEXPATH_GITHUB_CLIENT_SECRET=…
+
+# Optional, any time.
+fly secrets set VEXPATH_SENTRY_DSN=… VEXPATH_GITHUB_TOKEN=…
 ```
+
+The database URL is pasted from Neon unchanged: the driver is rewritten to
+psycopg either way, so the `postgresql://` form a provider gives you works.
 
 **`VEXPATH_SECRET_KEY` is load-bearing in three places and rotating it is not
 free.** It signs session cookies (every session ends), signs the OAuth state
@@ -53,7 +78,10 @@ still the local placeholder, and when `VEXPATH_BASE_URL` is not `https`.
 
 ```sh
 fly apps create vexpath
-fly volumes create vexpath_data --region lhr --size 20
+# Same region as the app and the database. 3GB is the free allowance and is
+# plenty: the volume holds the advisory snapshot and the call-graph cache,
+# both rebuildable.
+fly volumes create vexpath_data --region sin --size 3
 fly secrets set …                      # above
 fly deploy -c infra/fly.toml
 ```
@@ -65,10 +93,11 @@ that expects a column must not serve requests before that column exists.
 ## After the deploy, check these four things
 
 ```sh
-curl -fsS https://vexpath.dev/healthz   # the process is alive
-curl -fsS https://vexpath.dev/readyz    # it can reach the database
-curl -fsSo /dev/null -w '%{http_code}\n' https://vexpath.dev/login   # 200
-fly logs -c infra/fly.toml | head -20   # one JSON line per request
+curl -fsS https://vexpath.fly.dev/healthz   # the process is alive
+curl -fsS https://vexpath.fly.dev/readyz    # it can reach the database
+curl -fsSo /dev/null -w '%{http_code}\n' https://vexpath.fly.dev/login   # 200
+curl -fsS https://vexpath.fly.dev/package/PyPI/requests | head -5   # a page
+fly logs -c infra/fly.toml | head -20      # one JSON line per request
 ```
 
 `/readyz` answering 503 while `/healthz` answers 200 means the process is fine
@@ -88,7 +117,7 @@ easy to miss and invisible in a test.
 
 ```sh
 # Daily: download advisories and attach EPSS and KEV.
-fly machine run . -c infra/fly.toml --schedule daily --region lhr \
+fly machine run . -c infra/fly.toml --schedule daily --region sin \
   --volume vexpath_data:/data \
   --command "python -m vexpath_worker.main sync-advisories --ecosystem PyPI"
 
@@ -108,9 +137,13 @@ fly machine run . -c infra/fly.toml --schedule daily \
   --command "python -m vexpath_worker.main export-snapshot /data/advisories"
 ```
 
-The order that matters is sync → extract → export. `VEXPATH_ADVISORY_SNAPSHOT_DIR`
-points the API at the exported snapshot so the package pages and any
-server-side matching read the same corpus the command line does.
+The order that matters is sync → extract → export: without the export the
+extracted symbols never reach the tool that does the reaching.
+
+`VEXPATH_ADVISORY_SNAPSHOT_DIR` is for the worker, which writes the snapshot
+there, and for anything reading it afterwards. **The API never reads it** — its
+package pages are built from the database — so an empty volume on a first
+deploy breaks nothing.
 
 ## Running it by hand
 
@@ -134,10 +167,11 @@ the configured rate. That is written down in
 the fix is a shared counter in Postgres at the cost of a write per request —
 worth doing when there is a second machine, not before.
 
-Everything else is stateless. Sessions, keys and scans are in Postgres;
-artefacts are in R2; the snapshot and graph cache on the volume are
-rebuildable, so losing the volume costs a cold scan (fourteen minutes instead
-of twelve seconds) rather than data.
+Everything else is stateless. Sessions, keys and scans are in Postgres; the
+snapshot and graph cache on the volume are rebuildable, so losing the volume
+costs a cold scan (fourteen minutes instead of twelve seconds) rather than
+data. Object storage is configured for but not yet used by anything, so there
+is no third thing to back up.
 
 ## Rolling back
 

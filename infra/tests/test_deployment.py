@@ -151,6 +151,78 @@ def test_no_deployment_file_carries_a_secret() -> None:
             assert shape not in text, f"{path.name} looks like it holds a secret: {shape}"
 
 
+# --- The runbook and the configuration, which must agree ------------------
+
+RUNBOOK = INFRA.parent / "docs" / "09-deployment.md"
+
+
+@pytest.fixture(scope="module")
+def runbook() -> str:
+    return RUNBOOK.read_text(encoding="utf-8")
+
+
+def test_the_app_name_and_the_base_url_agree(fly: dict[str, object]) -> None:
+    """``VEXPATH_BASE_URL`` must be the host Fly actually serves this app on.
+
+    The base URL is not decoration: the session cookie's domain and the OAuth
+    callback are both built from it. Point it at a hostname that does not
+    resolve to this app and the deployment serves every public page, passes
+    every health check, and silently never completes a sign-in -- the failure
+    this whole file exists to catch. So until there is a custom domain, the
+    host is ``<app>.fly.dev`` and the two are checked against each other.
+    """
+    env = fly["env"]
+    assert isinstance(env, dict)
+    host = str(env["VEXPATH_BASE_URL"]).removeprefix("https://")
+    if host.endswith(".fly.dev"):
+        assert host == f"{fly['app']}.fly.dev", (
+            f"fly.toml serves {fly['app']}.fly.dev but the base URL says {host}; "
+            "sign-in would never complete"
+        )
+
+
+def test_the_runbook_commands_use_the_configured_region(
+    fly: dict[str, object], runbook: str
+) -> None:
+    """Every ``--region`` the runbook tells somebody to type is the app's own.
+
+    A volume in one region and the app in another is not an error anywhere:
+    Fly creates both, and the machine then either cannot mount the volume or
+    pays a cross-ocean round trip for every page. Copy-pasting a stale region
+    out of a document is exactly how that happens.
+    """
+    region = fly["primary_region"]
+    regions = {
+        line.split("--region", 1)[1].split()[0]
+        for line in runbook.splitlines()
+        if "--region" in line
+    }
+    assert regions, "the runbook names no region at all"
+    assert regions == {region}, f"fly.toml is in {region}; the runbook says {sorted(regions)}"
+
+
+def test_the_runbook_creates_the_volume_the_app_mounts(
+    fly: dict[str, object], runbook: str
+) -> None:
+    mounts = fly["mounts"]
+    assert isinstance(mounts, list)
+    source = mounts[0]["source"]
+    assert f"fly volumes create {source}" in runbook, (
+        f"the app mounts {source}; the runbook creates something else, so the "
+        "first deploy would wait forever for a volume that does not exist"
+    )
+
+
+def test_the_runbook_checks_the_host_it_deploys(fly: dict[str, object], runbook: str) -> None:
+    env = fly["env"]
+    assert isinstance(env, dict)
+    base = str(env["VEXPATH_BASE_URL"])
+    # The post-deploy checks are only a check if they are pointed at the
+    # thing that was deployed.
+    for probe in ("/healthz", "/readyz"):
+        assert f"{base}{probe}" in runbook, f"the runbook does not curl {base}{probe}"
+
+
 # --- The release workflow -------------------------------------------------
 
 #: The packages that go to PyPI, and the environment each publishes from.
