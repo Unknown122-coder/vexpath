@@ -26,6 +26,7 @@ import pytest
 import structlog
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from vexpath_api import observability
 from vexpath_api.observability import REQUEST_ID_HEADER
@@ -229,3 +230,62 @@ def test_an_empty_presented_id_falls_back_to_a_generated_one(
     client = build(captured, trust_proxy_headers=True)
     response = client.get("/v1/things/a", headers={REQUEST_ID_HEADER: "   "})
     assert response.headers[REQUEST_ID_HEADER].strip()
+
+
+# --- The scheme behind a proxy --------------------------------------------
+
+
+def _scheme_app(*, trust: bool) -> TestClient:
+    """A minimal app that reports the scheme it believes it is serving."""
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    from vexpath_api.observability import ForwardedSchemeMiddleware
+
+    async def scheme(request: Request) -> PlainTextResponse:
+        # url_for is what the templates use, so assert on the same thing.
+        return PlainTextResponse(request.url_for("scheme").scheme)
+
+    app = Starlette(routes=[Route("/scheme", scheme, name="scheme")])
+    app.add_middleware(ForwardedSchemeMiddleware, trust_proxy_headers=trust)
+    return TestClient(app)
+
+
+def test_a_trusted_proxy_decides_the_scheme() -> None:
+    """The bug this exists to prevent made the whole site unstyled.
+
+    Fly terminates TLS, so the connection the application sees is plain
+    http. Every page then emitted its stylesheet as an http URL while being
+    served over https; browsers refuse that as mixed content and the site's
+    own CSP refused it too, since ``style-src 'self'`` does not match
+    another scheme. The page answered 200, the stylesheet answered 200 to
+    anything asking directly, and only a browser console knew.
+    """
+    with _scheme_app(trust=True) as client:
+        response = client.get("/scheme", headers={"X-Forwarded-Proto": "https"})
+    assert response.text == "https"
+
+
+def test_an_untrusted_proxy_header_is_ignored() -> None:
+    # Off by default: a caller who can reach the application directly would
+    # otherwise choose the scheme its own links are built with.
+    with _scheme_app(trust=False) as client:
+        response = client.get("/scheme", headers={"X-Forwarded-Proto": "https"})
+    assert response.text == "http"
+
+
+def test_only_a_real_scheme_is_believed() -> None:
+    # A trusted proxy sends http or https. Anything else is somebody playing
+    # games, and the scheme stays as the connection found it.
+    with _scheme_app(trust=True) as client:
+        response = client.get("/scheme", headers={"X-Forwarded-Proto": "javascript"})
+    assert response.text == "http"
+
+
+def test_the_first_hop_wins_through_a_chain_of_proxies() -> None:
+    # X-Forwarded-Proto accumulates left to right, oldest first, so the
+    # client's own scheme is the first entry.
+    with _scheme_app(trust=True) as client:
+        response = client.get("/scheme", headers={"X-Forwarded-Proto": "https, http"})
+    assert response.text == "https"

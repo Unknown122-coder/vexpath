@@ -22,7 +22,7 @@ from starlette.types import ASGIApp
 
 from vexpath_api import __version__
 from vexpath_api.oauth import IdentityProvider
-from vexpath_api.observability import RequestContextMiddleware
+from vexpath_api.observability import ForwardedSchemeMiddleware, RequestContextMiddleware
 from vexpath_api.routers import (
     dashboard,
     evidence,
@@ -179,6 +179,10 @@ def create_app(
     # the request id -- including a rate-limit refusal, which is the one
     # somebody will ask about.
     app.add_middleware(RequestContextMiddleware, trust_proxy_headers=resolved.trust_proxy_headers)
+    # Last registered, so it runs first: everything above reads the scheme,
+    # and behind a TLS-terminating proxy the scheme on the connection is a
+    # lie. See ForwardedSchemeMiddleware for what that cost.
+    app.add_middleware(ForwardedSchemeMiddleware, trust_proxy_headers=resolved.trust_proxy_headers)
 
     @app.exception_handler(RedirectRequired)
     async def _redirect(request: Request, exc: RedirectRequired) -> Response:

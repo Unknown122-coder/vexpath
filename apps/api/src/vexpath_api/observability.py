@@ -34,6 +34,7 @@ import structlog
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from vexpath_platform.logging import get_logger
 
@@ -58,6 +59,46 @@ QUIET_PREFIXES = ("/healthz", "/readyz", "/static")
 #: Above this, a request is logged at warning level. Not an alert threshold --
 #: it is a marker so the slow ones are findable without a query language.
 SLOW_SECONDS = 2.0
+
+
+class ForwardedSchemeMiddleware:
+    """Believe ``X-Forwarded-Proto`` when a proxy terminates TLS.
+
+    Pure ASGI rather than ``BaseHTTPMiddleware`` and installed outermost,
+    because this has to be true before anything downstream reads the scheme:
+    ``url_for`` builds absolute URLs from it, and so do redirects.
+
+    Without it the application behind Fly sees ``http``, because that is what
+    the connection from the edge actually is. The consequence was not subtle
+    and took a day to notice: every page emitted
+    ``<link rel="stylesheet" href="http://...">`` while being served over
+    https, browsers refuse a stylesheet loaded that way as mixed content, and
+    the site's own Content-Security-Policy refused it too -- ``style-src
+    'self'`` does not match a different scheme. So every visitor got the HTML
+    with none of the design, and nothing anywhere said so: the page was 200,
+    the stylesheet was 200 to anything that asked for it directly, and only a
+    browser's console knew.
+
+    Gated on the same setting as the client address, and off by default for
+    the same reason: a caller who can reach the application directly could
+    otherwise claim any scheme they liked.
+    """
+
+    def __init__(self, app: ASGIApp, *, trust_proxy_headers: bool = False) -> None:
+        self.app = app
+        self.trust_proxy_headers = trust_proxy_headers
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and self.trust_proxy_headers:
+            for name, value in scope.get("headers", ()):
+                if name == b"x-forwarded-proto":
+                    # Only the two schemes this serves. A header saying
+                    # anything else is a caller playing games, not a proxy.
+                    forwarded = value.decode("latin-1").split(",")[0].strip().lower()
+                    if forwarded in ("http", "https"):
+                        scope["scheme"] = forwarded
+                    break
+        await self.app(scope, receive, send)
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -158,5 +199,6 @@ __all__ = [
     "QUIET_PREFIXES",
     "REQUEST_ID_HEADER",
     "SLOW_SECONDS",
+    "ForwardedSchemeMiddleware",
     "RequestContextMiddleware",
 ]
