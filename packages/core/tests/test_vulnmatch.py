@@ -342,3 +342,53 @@ def test_the_snapshot_source_indexes_the_committed_corpus(snapshot_dir: Path, ve
     source = SnapshotSource(snapshot_dir, verify=verify)
     assert len(source) >= 8
     assert source.snapshot_id == "test-snapshot-0001"
+
+
+# --- One vulnerability, one finding ---------------------------------------
+
+
+class _DuplicatingSource:
+    """A source that returns the same advisory twice, as OSV's live API does.
+
+    Not a contrived case. OSV holds every PyPI vulnerability twice -- once
+    from the GitHub Advisory Database as GHSA-..., once from PyPA as
+    PYSEC-... -- and both records name the same CVE, which is the identifier
+    this project chooses to show.
+    """
+
+    snapshot_id = None
+
+    def __init__(self, advisory: Advisory) -> None:
+        self._advisory = advisory
+
+    def advisories_for(self, purls: object) -> dict[str, tuple[Advisory, ...]]:
+        return dict.fromkeys(purls, (self._advisory, self._advisory))  # type: ignore[union-attr]
+
+
+def test_the_same_advisory_twice_is_one_finding() -> None:
+    """Every number this tool printed for a PyPI project used to be doubled.
+
+    A finding is a statement about one vulnerability in one installed
+    package. The same statement twice is not more information; it is a wrong
+    count, and a wrong count is the one thing a security report cannot
+    afford. Enforced in the matcher rather than trusted of the source,
+    because the matcher is where "a finding" is defined.
+    """
+    report = match(_sbom(_component("requests", "2.31.0")), _DuplicatingSource(_advisory()))
+
+    assert len(report.findings) == 1
+    assert report.findings[0].advisory.id == "CVE-2024-0001"
+
+
+def test_distinct_advisories_on_one_component_are_both_kept() -> None:
+    # The deduplication is by identifier, not by package: two real
+    # vulnerabilities in one dependency are two findings.
+    report = match(
+        _sbom(_component("requests", "2.31.0")),
+        _source(_advisory("CVE-2024-0001"), _advisory("CVE-2024-0002")),
+    )
+
+    assert {finding.advisory.id for finding in report.findings} == {
+        "CVE-2024-0001",
+        "CVE-2024-0002",
+    }

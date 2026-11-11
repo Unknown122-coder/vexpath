@@ -102,10 +102,22 @@ def match(
 
     findings: list[Finding] = []
     behind: dict[str, Advisory] = {}
+    # One finding per advisory per component, enforced here rather than
+    # assumed of the source. A finding is a statement about one
+    # vulnerability in one installed package: the same statement twice is
+    # not extra information, it is a wrong count. It happened -- OSV returns
+    # both the GHSA and the PYSEC record for a PyPI vulnerability and both
+    # are named by their shared CVE -- and the symptom was every number this
+    # tool printed being exactly double.
+    seen: set[tuple[str, str]] = set()
     for component in components:
         for advisory in candidates.get(component.purl, ()):
+            key = (advisory.id, component.purl)
+            if key in seen:
+                continue
             finding = finding_for(component, advisory)
             if finding is not None:
+                seen.add(key)
                 findings.append(finding)
                 behind[finding.id] = advisory
 

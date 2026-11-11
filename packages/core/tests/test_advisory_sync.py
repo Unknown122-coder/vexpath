@@ -226,3 +226,36 @@ def test_an_implausibly_large_export_is_refused(tmp_path: Path) -> None:
 def test_the_export_url_follows_the_documented_layout() -> None:
     assert OSV_EXPORT_BASE.startswith("https://")
     assert "osv-vulnerabilities" in OSV_EXPORT_BASE
+
+
+def test_two_osv_records_for_one_cve_collapse_to_one_advisory() -> None:
+    """GHSA and PYSEC describe the same thing; the CVE names both.
+
+    So the live source must collapse them, and must keep the record that
+    carries a repository URL: the fix commit is recovered from it, and
+    without a fix commit a reachability verdict is impossible rather than
+    merely absent.
+    """
+    from vexpath_core.advisory.source import _collapse_aliases
+    from vexpath_core.enums import Severity, SymbolsStatus
+    from vexpath_core.models.advisory import Advisory
+
+    def advisory(repo_url: str | None) -> Advisory:
+        return Advisory(
+            id="CVE-2024-0001",
+            summary="one vulnerability",
+            severity=Severity.HIGH,
+            repo_url=repo_url,
+            affected=(),
+            symbols_status=SymbolsStatus.PENDING,
+        )
+
+    collapsed = _collapse_aliases((advisory(None), advisory("https://github.com/psf/requests")))
+
+    assert len(collapsed) == 1
+    assert collapsed[0].repo_url == "https://github.com/psf/requests"
+
+    # And the preference does not depend on the order they arrive in.
+    collapsed = _collapse_aliases((advisory("https://github.com/psf/requests"), advisory(None)))
+    assert len(collapsed) == 1
+    assert collapsed[0].repo_url == "https://github.com/psf/requests"

@@ -154,7 +154,7 @@ class OsvApiSource:
             for purl, ids in zip(batch, identifiers, strict=True):
                 advisories = [self._fetch(identifier) for identifier in ids]
                 resolved = tuple(advisory for advisory in advisories if advisory is not None)
-                results[purl] = resolved
+                results[purl] = _collapse_aliases(resolved)
 
         return results
 
@@ -218,3 +218,30 @@ class OsvApiSource:
 
 
 __all__ = ["AdvisorySourceError", "OsvApiSource", "SnapshotSource"]
+
+
+def _collapse_aliases(advisories: Sequence[Advisory]) -> tuple[Advisory, ...]:
+    """One advisory per identifier, preferring the record that says more.
+
+    OSV holds the same PyPI vulnerability twice: once from the GitHub
+    Advisory Database as GHSA-..., once from PyPA as PYSEC-.... Both list the
+    same CVE as an alias, and this project deliberately names an advisory by
+    its CVE because that is what people search for and what regulation
+    cites. The consequence was not handled: two records collapsed to one
+    identifier and became two findings for one vulnerability, so every count
+    this tool printed for a PyPI project was doubled.
+
+    Where two records collapse, the one carrying a repository URL wins. That
+    is not cosmetic: the fix commit is recovered from it, and the fix commit
+    is what makes a reachability verdict possible rather than
+    ``symbols_unknown``. Otherwise the first is kept, which is OSV's own
+    order.
+    """
+    chosen: dict[str, Advisory] = {}
+    for advisory in advisories:
+        existing = chosen.get(advisory.id)
+        first_time = existing is None
+        better = existing is not None and existing.repo_url is None and advisory.repo_url
+        if first_time or better:
+            chosen[advisory.id] = advisory
+    return tuple(chosen.values())
