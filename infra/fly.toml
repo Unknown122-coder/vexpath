@@ -46,9 +46,11 @@ primary_region = "sin"
   # their address.
   VEXPATH_TRUST_PROXY_HEADERS = "true"
   VEXPATH_RATE_LIMIT_ENABLED = "true"
-  # Where the export job writes the enriched corpus and the scanner reads it.
-  # Set for the whole app because the scheduled worker machines share this
-  # configuration; the API itself never reads it.
+  # Declared, and read by nothing: the export and seed jobs both take the
+  # directory as a command argument. Kept because it is the obvious place to
+  # wire a default when something does read it, and because removing a name
+  # from a deployment is a change somebody has to think about. It is not doing
+  # any work today -- packages/platform/tests/test_settings.py asserts that.
   VEXPATH_ADVISORY_SNAPSHOT_DIR = "/data/advisories"
 
 [http_service]

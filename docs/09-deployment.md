@@ -28,7 +28,7 @@ healthy.
 | Thing | Why not |
 |---|---|
 | A Cloudflare R2 bucket | `VEXPATH_S3_*` exists in the configuration and **nothing reads it**: no artefact is written to object storage yet. Create it when something does, not before. |
-| A GitHub token | Only raises the API rate limit for the advisory pipeline's patch diffing. The extraction crawl is slower without one and works. |
+| A GitHub token | `VEXPATH_GITHUB_TOKEN` is declared and **nothing reads it**, like the S3 settings above. Symbol extraction talks to `git`, not to GitHub's API, so no rate limit applies to it. The setting is here for resolving tag references, which is not built yet. |
 
 Put the Fly app in the **same region as the database**. Every request makes
 several round trips to Postgres, so the distance between them is paid
@@ -57,7 +57,7 @@ fly secrets set \
 fly secrets set VEXPATH_GITHUB_CLIENT_ID=… VEXPATH_GITHUB_CLIENT_SECRET=…
 
 # Optional, any time.
-fly secrets set VEXPATH_SENTRY_DSN=… VEXPATH_GITHUB_TOKEN=…
+fly secrets set VEXPATH_SENTRY_DSN=…        # the only one that does anything
 ```
 
 The database URL is pasted from Neon unchanged: the driver is rewritten to
@@ -150,11 +150,15 @@ extracted into this corpus." Loading advisories is not enough to make those
 pages show anything, which is worth knowing before concluding that a fresh
 load failed.
 
-It is also the only part that genuinely needs a GitHub token. It clones fix
-commits and diffs them, thousands of advisories deep, and unauthenticated
-GitHub allows sixty requests an hour -- enough to prove the job runs and not
-enough to get through the corpus. It is resumable precisely because no single
-run finishes.
+**It needs no GitHub token**, whatever `VEXPATH_GITHUB_TOKEN` suggests. It
+clones with the `git` binary -- `git init --bare`, then a depth-2 fetch with
+`--filter=blob:none` so only commits and trees come down and file contents are
+read on demand -- and git fetches are not the API, so the sixty-requests-an-hour
+limit for unauthenticated API calls has nothing to do with this job. Measured:
+25 advisories in 72 seconds with no credentials of any kind.
+
+What it is, is long. It is resumable precisely because no single run finishes,
+and the backlog is thousands of advisories deep.
 
 Until it has run, every scan reports `reach.analysed = false` -- "nobody
 looked", which is deliberately not the same answer as "not reachable".
@@ -178,6 +182,14 @@ occasionally is fine with the cold start. Anything that is supposed to receive
 a webhook, or to look healthy to an uptime monitor, is not: the machine is
 stopped most of the time and a delivery to a stopped machine waits for it to
 boot.
+
+**It is not a limit on the corpus**, which is the question it looks like it
+answers. Symbol extraction takes hours and the five-minute stop makes it
+impossible *on Fly* -- but nothing requires it to run there. Extract locally,
+where no clock applies, `export-snapshot` the result, and load that snapshot
+into the live database in one short run. That is exactly the order
+sync → extract → export already prescribes, and it is why the export step
+exists at all.
 
 ## The advisory pipeline
 
@@ -211,10 +223,17 @@ fly machine run . -c infra/fly.toml --schedule daily \
 The order that matters is sync → extract → export: without the export the
 extracted symbols never reach the tool that does the reaching.
 
-`VEXPATH_ADVISORY_SNAPSHOT_DIR` is for the worker, which writes the snapshot
-there, and for anything reading it afterwards. **The API never reads it** — its
-package pages are built from the database — so an empty volume on a first
-deploy breaks nothing.
+`VEXPATH_ADVISORY_SNAPSHOT_DIR` is read by **nothing at all**. Both the export
+job and the seed job take the directory as a command argument, which is why
+every command above names `/data/advisories` explicitly. The package pages are
+built from the database, so an empty volume on a first deploy breaks nothing
+either.
+
+Three settings are like this — that one, `VEXPATH_GITHUB_TOKEN` and the
+`VEXPATH_S3_*` group. They are declared, documented here as inert, and
+`packages/platform/tests/test_settings.py` fails if that stops being true in
+either direction: if one of them gains a reader, or if any other setting loses
+its last one.
 
 ## Running it by hand
 

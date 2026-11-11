@@ -58,3 +58,91 @@ def test_unknown_variables_are_ignored(
     # not stop the application from starting.
     monkeypatch.setenv("VEXPATH_SOMETHING_WE_REMOVED", "1")
     assert Settings().env is Environment.LOCAL
+
+
+# --- Configuration that does nothing --------------------------------------
+
+#: Settings that are declared and that **nothing reads**.
+#:
+#: Asking an operator for a credential that does nothing is worse than not
+#: asking: they create it, store it, and believe it is load-bearing. The
+#: deployment runbook said a GitHub token "raises the API rate limit for the
+#: advisory pipeline's patch diffing" -- it does not, because that job runs
+#: the ``git`` binary and never calls the API -- and a token was created on
+#: the strength of that sentence.
+#:
+#: So the list is asserted in both directions: nothing here may have a
+#: reader, and nothing outside it may lack one. Wiring one of these up fails
+#: this test, which is the reminder to fix the documentation at the same time.
+DECLARED_BUT_UNREAD = frozenset(
+    {
+        # The export job and the seed job take the directory as a command
+        # argument, so this is never consulted. infra/fly.toml sets it anyway
+        # and used to carry a comment saying the worker reads it.
+        "advisory_snapshot_dir",
+        "github_token",
+        # Nothing threads this into the OSV client, which keeps its own
+        # default. Pointing the scanner at a mirror is therefore not possible
+        # yet, whatever the setting suggests.
+        "osv_api_base",
+        "s3_access_key_id",
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_region",
+        "s3_secret_access_key",
+    }
+)
+
+#: Where a setting may be mentioned without counting as a reader: its own
+#: definition. The scrubbing lists in logging.py and tracing.py name fields as
+#: strings rather than attributes, so the pattern below does not see them --
+#: and those two modules are real consumers of the logging and Sentry
+#: settings, so excluding the files would hide the readers along with the
+#: mentions.
+_NOT_READERS = ("settings.py",)
+
+
+def _readers(field: str) -> list[str]:
+    """Files that read ``field`` off a settings object."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    pattern = re.compile(rf"\.{re.escape(field)}\b")
+    found: list[str] = []
+    for directory in ("packages", "apps", "tools", "infra"):
+        for path in (root / directory).rglob("*.py"):
+            if path.name.endswith(_NOT_READERS) or "test" in path.parts:
+                continue
+            if path.name.startswith("test_") or path.name == "conftest.py":
+                continue
+            if pattern.search(path.read_text(encoding="utf-8")):
+                found.append(str(path.relative_to(root)))
+    return found
+
+
+def test_nothing_reads_the_settings_documented_as_unread() -> None:
+    for field in sorted(DECLARED_BUT_UNREAD):
+        readers = _readers(field)
+        assert not readers, (
+            f"{field} is listed as unread but {readers} reads it. Wire-up is "
+            "good news -- remove it from DECLARED_BUT_UNREAD and correct "
+            "docs/09-deployment.md, which tells operators it does nothing."
+        )
+
+
+def test_every_other_setting_is_actually_used() -> None:
+    from vexpath_platform.settings import Settings
+
+    unused: list[str] = []
+    for field in sorted(Settings.model_fields):
+        if field in DECLARED_BUT_UNREAD:
+            continue
+        if not _readers(field):
+            unused.append(field)
+
+    assert not unused, (
+        f"{unused} is configuration nothing consumes. Either use it, delete "
+        "it, or add it to DECLARED_BUT_UNREAD and say so in the runbook -- "
+        "but do not leave an operator believing it matters."
+    )
