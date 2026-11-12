@@ -241,9 +241,19 @@ code {
  */
 
 .narrow {
+  /* Width only. It used to set `margin: 3rem auto` and `padding: 0 1rem`,
+     and because this rule comes after `.panel` it won `padding` on every
+     `class="panel narrow"` -- so those panels had no vertical padding at
+     all and their text sat flush against the border. Composition, not
+     collision: `.narrow` says how wide, `.panel` says how padded. */
   max-width: 48ch;
-  margin: 3rem auto;
-  padding: 0 1rem;
+  margin-inline: auto;
+}
+
+/* A standalone narrow block still needs breathing room above and below;
+   a panel brings its own. */
+.narrow:not(.panel):not(.hero) {
+  margin-block: 3rem;
 }
 
 .app {
@@ -606,8 +616,12 @@ code {
    wrapped transcript stops being readable as columns, and the columns are
    what make it legible at a glance. */
 .transcript {
-  margin: var(--gap) 0;
-  padding: 1rem;
+  margin: var(--gap) 0 0;
+  padding: 1rem 1.1rem;
+  /* Both needed. The scroll keeps a long line inside the rounded border
+     instead of spilling past it, and the max-width stops the block being
+     sized by its widest line, which is what pushed it out of the panel. */
+  max-width: 100%;
   overflow-x: auto;
   font-family: var(--font-mono);
   font-size: 0.82rem;

@@ -143,3 +143,33 @@ def test_the_home_page_shows_output_before_it_explains_itself() -> None:
         >= 2
         for route in app.router.routes
     )
+
+
+def test_a_layout_class_does_not_strip_a_panel_s_padding() -> None:
+    """``.narrow`` and ``.panel`` are composed, so they must not collide.
+
+    ``.narrow`` set ``padding: 0 1rem`` and sits after ``.panel`` in the
+    stylesheet, so it won the cascade on every ``class="panel narrow"``:
+    those panels had no vertical padding and their text sat flush against
+    the border. Two classes that are always used together must divide the
+    work -- one says how wide, the other how padded -- and a rule that
+    quietly takes over the other's property is how a page ends up looking
+    broken with nothing in it being wrong on its own.
+    """
+    import re
+
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    block = re.search(r"\.narrow \{(.*?)\n\}", css, re.S)
+    assert block is not None, ".narrow is gone; this test needs rewriting"
+
+    declarations = [
+        line.split("/*")[0].strip()
+        for line in block.group(1).splitlines()
+        if ":" in line.split("/*")[0]
+    ]
+    for declaration in declarations:
+        property_name = declaration.split(":", 1)[0].strip()
+        assert property_name not in {"padding", "padding-block", "margin", "margin-block"}, (
+            f".narrow sets {property_name}, which overrides .panel because it comes "
+            f"later in the stylesheet. Keep .narrow to width and centring."
+        )
