@@ -61,6 +61,12 @@ class FixReference:
     pull_request: int | None = None
     #: Version whose release tag can be diffed, the weakest option.
     fixed_version: str | None = None
+    #: The other end of a release diff. When set, ``commit`` is diffed
+    #: against this rather than against its own parent: a release tag points
+    #: at a release commit, whose parent diff is usually a version bump and
+    #: nothing else, so the fix is only visible across the whole range from
+    #: the previous release.
+    base: str | None = None
     host: str = "github.com"
     owner: str = ""
     name: str = ""
@@ -79,6 +85,16 @@ class FixReference:
     def needs_resolution(self) -> bool:
         """Whether an API call is still required to get a commit."""
         return self.commit is None
+
+    @property
+    def is_release_range(self) -> bool:
+        """Whether this names a span of releases rather than one commit.
+
+        Worth distinguishing everywhere it is read: a symbol found across a
+        release contains every change in that release, so it is evidence
+        about the release and only probably about the fix.
+        """
+        return self.base is not None
 
 
 class UnresolvableFixError(Exception):

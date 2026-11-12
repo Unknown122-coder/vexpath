@@ -13,12 +13,18 @@ thousands.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from vexpath_core.enums import Confidence, SymbolsStatus
-from vexpath_core.models.advisory import Advisory, VulnerableSymbol
+from vexpath_core.advisory.coverage import FixReferenceTier
+from vexpath_core.enums import Confidence, SymbolSource, SymbolsStatus
+from vexpath_core.models.advisory import Advisory, AffectedPackage, VulnerableSymbol
 from vexpath_core.patchdiff.extract import extract
-from vexpath_core.patchdiff.fetch import CommitSource, FetchError
+from vexpath_core.patchdiff.fetch import (
+    MAX_FILES_PER_TAG_DIFF,
+    MAX_SYMBOLS_PER_TAG_DIFF,
+    CommitSource,
+    FetchError,
+)
 from vexpath_core.patchdiff.layout import layout_for
 from vexpath_core.patchdiff.references import (
     FixReference,
@@ -90,19 +96,18 @@ def extract_for_advisory(
         return PatchDiffResult(advisory_id=advisory.id, status=SymbolsStatus.NONE, detail=str(exc))
 
     if reference.needs_resolution:
-        # A pull request or release tag still needs a lookup to become a
-        # commit. Recording the reference means the next run can start there
-        # rather than resolving it again.
-        return PatchDiffResult(
-            advisory_id=advisory.id,
-            status=SymbolsStatus.PENDING,
-            reference=reference,
-            detail=(
-                f"The fix is identified by a {reference.tier.value.replace('_', ' ')} "
-                f"rather than a commit, which has to be resolved before the diff "
-                f"can be read."
-            ),
-        )
+        resolved, detail = _resolve_release_range(advisory, reference, source, packages)
+        if resolved is None:
+            # A pull request still needs an API call this build does not make,
+            # and a tag whose release could not be located stays unresolved.
+            # Recording the reference means the next run can start there.
+            return PatchDiffResult(
+                advisory_id=advisory.id,
+                status=SymbolsStatus.PENDING,
+                reference=reference,
+                detail=detail,
+            )
+        reference = resolved
 
     try:
         commit_diff = source.fetch(reference)
@@ -112,6 +117,24 @@ def extract_for_advisory(
             status=SymbolsStatus.FAILED,
             reference=reference,
             detail=f"Could not fetch {reference.commit} from {reference.repository}: {exc}",
+        )
+
+    if reference.is_release_range and len(commit_diff.files) > MAX_FILES_PER_TAG_DIFF:
+        # Refused rather than truncated. Taking the first forty files of a
+        # large release would name an arbitrary subset of its changes as the
+        # vulnerable symbols, which is worse than naming none: it reads as
+        # evidence.
+        return PatchDiffResult(
+            advisory_id=advisory.id,
+            status=SymbolsStatus.NONE,
+            reference=reference,
+            detail=(
+                f"The release that fixed this touches {len(commit_diff.files)} Python "
+                f"files, above the {MAX_FILES_PER_TAG_DIFF} allowed for a release "
+                f"diff. Every change in a release would be recorded as vulnerable, "
+                f"which would make any project using this package look reachable."
+            ),
+            notes=commit_diff.notes,
         )
 
     if not commit_diff.files:
@@ -145,10 +168,28 @@ def extract_for_advisory(
             layout,
             reference_confidence=reference.confidence,
             commit=reference.commit,
+            source=(
+                SymbolSource.TAG_DIFF if reference.is_release_range else SymbolSource.FIX_COMMIT
+            ),
         )
         collected.extend(symbols)
         failures.extend(report.failures)
         refactor = refactor or report.looks_like_refactor
+
+    if reference.is_release_range and len(collected) > MAX_SYMBOLS_PER_TAG_DIFF:
+        return PatchDiffResult(
+            advisory_id=advisory.id,
+            status=SymbolsStatus.NONE,
+            reference=reference,
+            detail=(
+                f"The release that fixed this changed {len(collected)} functions, above "
+                f"the {MAX_SYMBOLS_PER_TAG_DIFF} allowed for a release diff. A fix "
+                f"commit names four at the median; a list this long is an inventory "
+                f"of the package rather than evidence about the fix, and would make "
+                f"every project importing it look reachable."
+            ),
+            notes=(*commit_diff.notes, *failures),
+        )
 
     if not collected:
         return PatchDiffResult(
@@ -162,10 +203,18 @@ def extract_for_advisory(
             notes=(*commit_diff.notes, *failures),
         )
 
-    detail = (
-        f"Extracted {len(collected)} symbol(s) from commit "
-        f"{reference.commit[:12] if reference.commit else '?'}."
-    )
+    if reference.is_release_range:
+        detail = (
+            f"Extracted {len(collected)} symbol(s) by diffing the release that fixed "
+            f"this against the one before it, because the advisory names no fix "
+            f"commit. These are the functions the *release* changed, so some of them "
+            f"are unrelated to the fix."
+        )
+    else:
+        detail = (
+            f"Extracted {len(collected)} symbol(s) from commit "
+            f"{reference.commit[:12] if reference.commit else '?'}."
+        )
     if refactor:
         detail += (
             " The commit touches enough symbols to look like a refactor, so every "
@@ -181,6 +230,49 @@ def extract_for_advisory(
         detail=detail,
         notes=(*commit_diff.notes, *failures),
     )
+
+
+def _resolve_release_range(
+    advisory: Advisory,
+    reference: FixReference,
+    source: CommitSource,
+    packages: list[AffectedPackage],
+) -> tuple[FixReference | None, str]:
+    """Turn a reference naming only a fixed version into one naming commits.
+
+    Returns the resolved reference, or None with the reason it stayed
+    unresolved. The reason is the message a human reads next to the advisory,
+    so it says which of the several ways this fails happened.
+    """
+    if reference.tier is not FixReferenceTier.TAG_DERIVABLE or not reference.fixed_version:
+        return None, (
+            f"The fix is identified by a {reference.tier.value.replace('_', ' ')} "
+            f"rather than a commit, which has to be resolved before the diff "
+            f"can be read."
+        )
+
+    # The versions the advisory says are affected narrow the span: the highest
+    # of them is the last release known to be vulnerable.
+    affected_versions = sorted({version for package in packages for version in package.versions})
+
+    try:
+        resolved = source.resolve_release_range(
+            reference.repository,
+            reference.fixed_version,
+            affected_versions=affected_versions,
+        )
+    except FetchError as exc:
+        return None, f"The release tags of {reference.repository} could not be read: {exc}"
+
+    if resolved is None:
+        return None, (
+            f"No release tag matching {reference.fixed_version} was found in "
+            f"{reference.repository}, so there is no release to diff. The project may "
+            f"tag releases differently, or not at all."
+        )
+
+    base, commit = resolved
+    return replace(reference, commit=commit, base=base), ""
 
 
 def with_symbols(advisory: Advisory, result: PatchDiffResult) -> Advisory:

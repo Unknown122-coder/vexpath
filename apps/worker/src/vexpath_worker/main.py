@@ -182,6 +182,17 @@ def extract_symbols_command(
         bool,
         typer.Option("--backlog/--no-backlog", help="Print what is still waiting afterwards."),
     ] = True,
+    retry_exhausted: Annotated[
+        bool,
+        typer.Option(
+            "--retry-exhausted",
+            help=(
+                "Put advisories the queue gave up on back in it. For after the "
+                "extractor gains a capability: a run that failed because nothing "
+                "could resolve a release tag says nothing about a build that can."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Extract vulnerable symbols from advisories' fix commits.
 
@@ -208,6 +219,7 @@ def extract_symbols_command(
             batch=batch,
             advisory_ids=named or None,
             cache_root=cache_root,
+            retry_exhausted=retry_exhausted,
         )
         typer.echo(report.summary_line())
         if show_backlog:

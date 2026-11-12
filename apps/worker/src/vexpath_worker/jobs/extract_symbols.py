@@ -107,6 +107,7 @@ def extract_symbols(
     advisory_ids: Sequence[str] | None = None,
     source: CommitSource | None = None,
     cache_root: Path | None = None,
+    retry_exhausted: bool = False,
 ) -> ExtractReport:
     """Extract symbols for the next batch of advisories awaiting them.
 
@@ -124,6 +125,13 @@ def extract_symbols(
             up on stays given up on.
         source: Where commits come from. Defaults to fetching over the network.
             Injected so tests run offline against recorded diffs.
+        retry_exhausted: Put advisories the queue gave up on back in it, by
+            clearing their attempt counter. For when the extractor gains a
+            capability, not for when somebody is impatient: a run that failed
+            because nothing could resolve a release tag is not evidence about
+            a build that can. Off by default, because a deleted repository
+            fails identically for ever and retrying it costs a fetch each
+            time.
         cache_root: Where bare repositories are kept between fetches, so that
             advisories sharing a repository cost one fetch rather than several.
 
@@ -134,6 +142,10 @@ def extract_symbols(
     """
     commit_source = source if source is not None else GitCommitSource(cache_root=cache_root)
     report = ExtractReport()
+
+    if retry_exhausted:
+        revived = _reset_exhausted(engine, ecosystem)
+        log.info("advisory.patchdiff.retry_exhausted", ecosystem=ecosystem, advisories=revived)
 
     queued = _claim(engine, ecosystem=ecosystem, batch=batch, advisory_ids=advisory_ids)
     if not queued:
@@ -199,6 +211,32 @@ def _by_repository(queued: Sequence[Advisory]) -> Iterator[tuple[str, list[Advis
         grouped[advisory.repo_url or ""].append(advisory)
     for repository in sorted(grouped):
         yield repository, grouped[repository]
+
+
+def _reset_exhausted(engine: Engine, ecosystem: str) -> int:
+    """Clear the attempt counter on advisories the queue has retired.
+
+    Scoped to those still awaiting symbols: one already extracted, or
+    recorded as having nothing to extract, is not waiting for another go.
+    """
+    affected = (
+        select(advisory_affected.c.advisory_id)
+        .where(advisory_affected.c.ecosystem == ecosystem)
+        .scalar_subquery()
+    )
+    with engine.begin() as connection:
+        result = connection.execute(
+            update(advisories)
+            .where(
+                and_(
+                    advisories.c.symbols_status == SymbolsStatus.PENDING.value,
+                    advisories.c.symbols_attempts >= MAX_ATTEMPTS,
+                    advisories.c.id.in_(affected),
+                )
+            )
+            .values(symbols_attempts=0)
+        )
+    return int(result.rowcount or 0)
 
 
 def _claim(

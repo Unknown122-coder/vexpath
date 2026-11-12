@@ -27,6 +27,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from packaging.version import InvalidVersion
+from packaging.version import Version as Pep440Version
+
 from vexpath_core.patchdiff.references import ALLOWED_HOSTS, FixReference
 from vexpath_core.patchdiff.unidiff import FileDiff, python_files
 
@@ -43,6 +46,36 @@ DIFF_TIMEOUT_SECONDS = 30
 MAX_DIFF_BYTES = 8 * 1024 * 1024
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_FILES_PER_COMMIT = 200
+
+#: Python files a release diff may touch before it is refused.
+#:
+#: Much smaller than the per-commit cap, and for a different reason. That one
+#: guards against a vendored dependency landing in one commit; this one
+#: guards against the thing a release diff *usually* is. A release contains
+#: every change made since the last one, so taking its symbols means claiming
+#: the fix touched all of them -- and a corpus where jinja2 has four hundred
+#: vulnerable symbols makes every project that imports jinja2 reachable,
+#: which is indistinguishable from having no reachability analysis at all.
+#:
+#: Forty is a release small enough that its contents are plausibly about one
+#: thing. Above that the advisory stays unextracted, which is an honest
+#: "nobody could look" rather than a confident wrong answer.
+MAX_FILES_PER_TAG_DIFF = 40
+
+#: Symbols a release diff may name before it is refused.
+#:
+#: The file cap is not enough, which measuring showed rather than argued: a
+#: release touching thirty files named 248 symbols for one package. Across the
+#: corpus a fix commit names 4 symbols at the median and 22 at the ninetieth
+#: percentile; a release diff named 25 at the median and 104 at the
+#: ninetieth. Six times noisier in the middle and five times at the tail.
+#:
+#: So a release diff may name no more symbols than a typical fix commit does.
+#: Beyond that it has stopped being evidence about a fix and become an
+#: inventory of a package, and an advisory listing a hundred functions makes
+#: every project importing that package reachable -- a confident wrong answer
+#: in place of an honest "nobody could look".
+MAX_SYMBOLS_PER_TAG_DIFF = 25
 
 #: Environment for every git call. Hooks off, no prompting, no system or user
 #: configuration, so a developer's own git settings cannot change what a scan
@@ -91,6 +124,17 @@ class CommitSource(Protocol):
 
         Raises:
             FetchError: if the commit cannot be retrieved.
+        """
+        ...
+
+    def resolve_release_range(
+        self, repository: str, fixed_version: str, *, affected_versions: Sequence[str] = ()
+    ) -> tuple[str, str] | None:
+        """Return ``(previous_commit, fixed_commit)``, or None if unresolved.
+
+        Part of the protocol because the pipeline cannot extract from a
+        version number: an advisory that names only "fixed in 2.11.3" needs
+        this call before there is anything to diff.
         """
         ...
 
@@ -155,6 +199,9 @@ class GitCommitSource:
                 workspace = Path(directory)
                 self._prepare(workspace, reference.repository)
                 self._fetch_commit(workspace, reference.commit)
+                if reference.base is not None:
+                    # Both ends, or the diff has nothing to measure from.
+                    self._fetch_commit(workspace, reference.base)
                 return self._read(workspace, reference)
 
         workspace = self._cache_root / _repository_slug(reference.repository)
@@ -254,9 +301,66 @@ class GitCommitSource:
                 return tags[candidate]
         return None
 
+    def resolve_release_range(
+        self, repository: str, fixed_version: str, *, affected_versions: Sequence[str] = ()
+    ) -> tuple[str, str] | None:
+        """Return ``(previous_commit, fixed_commit)`` for a fixed version.
+
+        The missing half of tag resolution. An advisory that names only "fixed
+        in 2.11.3" has no commit to diff, and 2,441 PyPI advisories -- most of
+        what is left after fix commits are exhausted -- are exactly that.
+
+        One ``ls-remote``, then the work is version arithmetic: find the tag
+        for the fixed release, and the tag immediately below it, because the
+        fix is somewhere between them. Tags are ordered by PEP 440 rather than
+        by string, so 2.11.10 sorts above 2.11.9, and pre-releases are skipped
+        -- a release candidate is not the previous release.
+
+        Returns None when either end cannot be found, which is a reference
+        that stays unresolved rather than a guess.
+        """
+        if repository_host(repository) not in ALLOWED_HOSTS:
+            msg = f"refusing to contact {repository}, which is not on the allow-list"
+            raise FetchError(msg)
+
+        tags = self._list_tags(repository)
+        if not tags:
+            return None
+
+        fixed_tag = _match_tag(tags, fixed_version)
+        if fixed_tag is None:
+            return None
+
+        previous_tag = _previous_release(tags, fixed_tag[0], affected_versions=affected_versions)
+        if previous_tag is None:
+            return None
+        return previous_tag[1], fixed_tag[1]
+
+    def _list_tags(self, repository: str) -> dict[str, str]:
+        """Every tag the remote advertises, as name to commit."""
+        with tempfile.TemporaryDirectory() as directory:
+            listing = self._run(
+                ["ls-remote", "--tags", "--refs", repository],
+                Path(directory),
+                timeout=self._fetch_timeout,
+                allow_failure=True,
+            )
+        if not listing:
+            return {}
+        tags: dict[str, str] = {}
+        for line in listing.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].startswith("refs/tags/"):
+                tags[parts[1].removeprefix("refs/tags/")] = parts[0]
+        return tags
+
     def _read(self, workspace: Path, reference: FixReference) -> CommitDiff:
         commit = reference.commit or "FETCH_HEAD"
-        parent = f"{commit}^"
+        # A release range diffs from the previous release rather than from
+        # this commit's parent. A release commit's parent diff is usually a
+        # version bump and a changelog entry, so diffing it would find the
+        # fix in approximately none of these advisories.
+        parent = reference.base or f"{commit}^"
         notes: list[str] = []
 
         diff = self._run(
@@ -375,6 +479,75 @@ def repository_host(repository: str) -> str:
     return without_scheme.split("/", 1)[0].lower()
 
 
+#: How projects spell the same release. Tried in order.
+TAG_SPELLINGS: tuple[str, ...] = ("{version}", "v{version}", "release-{version}", "rel-{version}")
+
+
+def _match_tag(tags: dict[str, str], version: str) -> tuple[str, str] | None:
+    """The tag naming ``version``, trying the spellings projects use."""
+    for template in TAG_SPELLINGS:
+        candidate = template.format(version=version)
+        if candidate in tags:
+            return candidate, tags[candidate]
+    return None
+
+
+def _previous_release(
+    tags: dict[str, str], fixed_tag: str, *, affected_versions: Sequence[str] = ()
+) -> tuple[str, str] | None:
+    """The release immediately below ``fixed_tag``, by PEP 440 order.
+
+    When the advisory lists the versions it affects, the highest of those is
+    preferred: it is the last release known to be vulnerable, so the span to
+    the fix is exactly the window the fix closed. Falling back to "whatever
+    tag sorts next" is a guess, but a narrow one, and narrower than the
+    alternative of not looking.
+    """
+    parsed: list[tuple[Pep440Version, str]] = []
+    for name in tags:
+        version = _version_of(name)
+        if version is None or version.is_prerelease:
+            # A release candidate is not the previous release, and diffing
+            # from one would attribute its changes to the fix.
+            continue
+        parsed.append((version, name))
+    if not parsed:
+        return None
+
+    fixed_version = _version_of(fixed_tag)
+    if fixed_version is None:
+        return None
+
+    for candidate in sorted(affected_versions, key=_sort_key, reverse=True):
+        matched = _match_tag(tags, candidate)
+        if matched is not None and (_version_of(matched[0]) or fixed_version) < fixed_version:
+            return matched
+
+    below = [entry for entry in parsed if entry[0] < fixed_version]
+    if not below:
+        return None
+    name = max(below)[1]
+    return name, tags[name]
+
+
+def _version_of(tag: str) -> Pep440Version | None:
+    """Parse a tag as a version, or None if it is not one."""
+    text = tag
+    for prefix in ("release-", "rel-", "v"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+            break
+    try:
+        return Pep440Version(text)
+    except InvalidVersion:
+        return None
+
+
+def _sort_key(version: str) -> Pep440Version:
+    parsed = _version_of(version)
+    return parsed if parsed is not None else Pep440Version("0")
+
+
 def _repository_slug(repository: str) -> str:
     """A filesystem-safe directory name for one repository URL.
 
@@ -408,6 +581,10 @@ class RecordedCommitSource:
     """
 
     diffs: dict[str, CommitDiff]
+    #: Release tag to commit, for resolving a version to a range. Empty by
+    #: default, which is a repository that advertises no tags -- the same
+    #: answer a project without releases gives.
+    tags: dict[str, str] = field(default_factory=dict)
 
     def fetch(self, reference: FixReference) -> CommitDiff:
         key = reference.commit or reference.repository
@@ -415,6 +592,18 @@ class RecordedCommitSource:
             msg = f"no recorded diff for {key}"
             raise FetchError(msg)
         return self.diffs[key]
+
+    def resolve_release_range(
+        self, repository: str, fixed_version: str, *, affected_versions: Sequence[str] = ()
+    ) -> tuple[str, str] | None:
+        """The same version arithmetic as the real source, on recorded tags."""
+        fixed = _match_tag(self.tags, fixed_version)
+        if fixed is None:
+            return None
+        previous = _previous_release(self.tags, fixed[0], affected_versions=affected_versions)
+        if previous is None:
+            return None
+        return previous[1], fixed[1]
 
 
 __all__ = [

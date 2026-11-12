@@ -253,6 +253,7 @@ def extract(
     *,
     reference_confidence: Confidence = Confidence.HIGH,
     commit: str | None = None,
+    source: SymbolSource = SymbolSource.FIX_COMMIT,
 ) -> tuple[tuple[VulnerableSymbol, ...], ExtractionReport]:
     """Extract every vulnerable symbol a commit's diff reveals.
 
@@ -265,6 +266,10 @@ def extract(
         layout: How this repository's paths map to module names.
         reference_confidence: How trustworthy the fix reference was.
         commit: Commit the symbols came from, recorded for provenance.
+        source: How these symbols were obtained. A release-range diff is
+            ``TAG_DIFF`` rather than ``FIX_COMMIT``, and the difference is
+            not cosmetic: one names the functions a fix changed, the other
+            the functions a release changed.
     """
     report = ExtractionReport()
 
@@ -313,7 +318,7 @@ def extract(
             package_name=package,
             symbol=item.symbol,
             kind=item.kind,
-            source=SymbolSource.FIX_COMMIT,
+            source=source,
             confidence=item.confidence,
             file_path=item.file_path,
             fix_commit=commit,

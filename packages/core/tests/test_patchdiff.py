@@ -885,3 +885,174 @@ def test_each_repository_gets_its_own_cache_directory() -> None:
     assert one != three
     # The .git suffix names the same upstream, so it shares the object store.
     assert one == two
+
+
+# --- Resolving a release tag ----------------------------------------------
+#
+# 2,441 PyPI advisories -- most of what is left after fix commits run out --
+# name only "fixed in 2.11.3". The resolver exists to turn that into
+# something diffable, and the diff is a release rather than a commit, which
+# is the whole reason these symbols are recorded differently.
+
+
+def test_a_fixed_version_resolves_to_the_span_that_closed_it() -> None:
+    from vexpath_core.patchdiff.fetch import _previous_release
+
+    tags = {"2.11.1": "a" * 40, "2.11.2": "b" * 40, "2.11.3": "c" * 40}
+    assert _previous_release(tags, "2.11.3") == ("2.11.2", "b" * 40)
+
+
+def test_tags_are_ordered_by_version_and_not_by_string() -> None:
+    """2.11.10 is above 2.11.9, which sorting text gets backwards."""
+    from vexpath_core.patchdiff.fetch import _previous_release
+
+    tags = {"2.11.9": "a" * 40, "2.11.10": "b" * 40, "2.11.11": "c" * 40}
+    assert _previous_release(tags, "2.11.11") == ("2.11.10", "b" * 40)
+
+
+def test_a_release_candidate_is_not_the_previous_release() -> None:
+    """Diffing from an rc would blame the fix for the rc's own changes."""
+    from vexpath_core.patchdiff.fetch import _previous_release
+
+    tags = {"3.0.0": "a" * 40, "3.1.0rc1": "b" * 40, "3.1.0": "c" * 40}
+    assert _previous_release(tags, "3.1.0") == ("3.0.0", "a" * 40)
+
+
+def test_the_last_affected_version_narrows_the_span() -> None:
+    """The advisory knows which releases were vulnerable; use the newest.
+
+    Without it the span is "the tag that happens to sort next", which over a
+    project that ships often is the same thing, and over one that does not is
+    needlessly wide.
+    """
+    from vexpath_core.patchdiff.fetch import _previous_release
+
+    tags = {"1.0": "a" * 40, "2.0": "b" * 40, "3.0": "c" * 40, "4.0": "d" * 40}
+    assert _previous_release(tags, "4.0", affected_versions=["1.0", "2.0"]) == ("2.0", "b" * 40)
+
+
+def test_the_spellings_projects_actually_use_are_tried() -> None:
+    from vexpath_core.patchdiff.fetch import _match_tag
+
+    for spelling in ("2.11.3", "v2.11.3", "release-2.11.3", "rel-2.11.3"):
+        assert _match_tag({spelling: SHA}, "2.11.3") == (spelling, SHA)
+    assert _match_tag({"2.11.4": SHA}, "2.11.3") is None
+
+
+def _release_source(
+    files: tuple[object, ...], *, tags: dict[str, str] | None = None
+) -> RecordedCommitSource:
+    """A source whose diff is keyed on the fixed release's commit."""
+    return RecordedCommitSource(
+        diffs={
+            "c" * 40: CommitDiff(
+                commit="c" * 40,
+                repository="https://github.com/psf/requests",
+                files=files,  # type: ignore[arg-type]
+            )
+        },
+        tags=tags if tags is not None else {"2.31.0": "b" * 40, "2.32.0": "c" * 40},
+    )
+
+
+def test_an_advisory_with_only_a_fixed_version_is_now_extracted() -> None:
+    """The 2,441 advisories this was built for.
+
+    No fix commit anywhere in the record, only "fixed in 2.32.0". Before the
+    resolver these stayed pending for ever: the queue re-served them, each
+    run reported "needs a reference resolved", and seven passes of two
+    hundred extracted nothing at all.
+    """
+    advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
+    source = _release_source(
+        ((_file_diff("requests/sessions.py", [6, 7], []), POST_SOURCE, PRE_SOURCE),)
+    )
+
+    result = extract_for_advisory(advisory, source)
+
+    assert result.status is SymbolsStatus.EXTRACTED
+    assert "requests.sessions.Session.send" in {symbol.symbol for symbol in result.symbols}
+
+
+def test_symbols_from_a_release_say_they_came_from_a_release() -> None:
+    """Not fix_commit. The distinction is the honesty of the whole corpus.
+
+    A symbol found by diffing a release is a function that *changed in that
+    release*, which is weaker evidence than one the fix itself touched, and
+    the confidence and the source both have to say so or a reader cannot
+    tell the two apart.
+    """
+    advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
+    source = _release_source(
+        ((_file_diff("requests/sessions.py", [6, 7], []), POST_SOURCE, PRE_SOURCE),)
+    )
+
+    result = extract_for_advisory(advisory, source)
+
+    assert {symbol.source for symbol in result.symbols} == {SymbolSource.TAG_DIFF}
+    assert result.best_confidence is Confidence.LOW
+    assert "release" in result.detail
+
+
+def test_a_release_with_no_matching_tag_stays_pending() -> None:
+    advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
+    source = _release_source((), tags={"1.0.0": "a" * 40})
+
+    result = extract_for_advisory(advisory, source)
+
+    assert result.status is SymbolsStatus.PENDING
+    assert "No release tag matching 2.32.0" in result.detail
+
+
+def test_a_release_touching_too_much_is_refused_rather_than_truncated() -> None:
+    """Taking the first forty files of a big release would read as evidence.
+
+    A release contains everything changed since the last one. Recording its
+    symbols means claiming the fix touched all of them, and a corpus where a
+    popular package has hundreds of vulnerable symbols makes every project
+    that imports it look reachable -- which is indistinguishable from having
+    no reachability analysis.
+    """
+    from vexpath_core.patchdiff.fetch import MAX_FILES_PER_TAG_DIFF
+
+    advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
+    many = tuple(
+        (_file_diff(f"requests/module{index}.py", [6, 7], []), POST_SOURCE, PRE_SOURCE)
+        for index in range(MAX_FILES_PER_TAG_DIFF + 1)
+    )
+    source = _release_source(many)
+
+    result = extract_for_advisory(advisory, source)
+
+    assert result.status is SymbolsStatus.NONE
+    assert "above the" in result.detail
+    assert not result.symbols
+
+
+def test_a_release_naming_too_many_functions_is_refused() -> None:
+    """Measured, not guessed: the file cap let 248 symbols through.
+
+    Across this corpus a fix commit names 4 symbols at the median and 22 at
+    the ninetieth percentile. A release diff named 25 at the median and 104
+    at the ninetieth, and one release touching only thirty files named 248
+    functions for a single advisory. A list that long is an inventory of the
+    package, not evidence about a fix, and it would make every project
+    importing that package look reachable -- a confident wrong answer where
+    "nobody could look" was the truth.
+    """
+    from vexpath_core.patchdiff.fetch import MAX_SYMBOLS_PER_TAG_DIFF
+
+    advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
+    # Few files, many functions in each: the shape the file cap misses.
+    crowded = "\n".join(f"def handler{index}():\n    return {index}" for index in range(60))
+    files = tuple(
+        (_file_diff(f"requests/part{index}.py", list(range(1, 121)), []), crowded, None)
+        for index in range(3)
+    )
+    source = _release_source(files)
+
+    result = extract_for_advisory(advisory, source)
+
+    assert result.status is SymbolsStatus.NONE
+    assert f"above the {MAX_SYMBOLS_PER_TAG_DIFF}" in result.detail
+    assert not result.symbols
