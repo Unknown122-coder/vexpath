@@ -186,11 +186,11 @@ new one would load instead of it, silently and with a valid hash.
 
 ```sh
 # One line, because the machine stops five minutes after it starts.
-export MSYS_NO_PATHCONV=1   # Git Bash only; see below
-curl -sS -o /dev/null https://vexpath.fly.dev/healthz   # wake it
+curl -sS https://vexpath.fly.dev/healthz > /dev/null   # wake it
 fly ssh console -c infra/fly.toml -C "mkdir -p /data/corpus"
-fly sftp put -c infra/fly.toml var/snapshot-gz/snapshot.json /data/corpus/snapshot.json
-fly sftp put -c infra/fly.toml var/snapshot-gz/advisories.jsonl.gz /data/corpus/advisories.jsonl.gz
+# MSYS_NO_PATHCONV per command, not exported: see below for both halves of why.
+MSYS_NO_PATHCONV=1 fly sftp put -c infra/fly.toml   var/snapshot-gz/snapshot.json /data/corpus/snapshot.json
+MSYS_NO_PATHCONV=1 fly sftp put -c infra/fly.toml   var/snapshot-gz/advisories.jsonl.gz /data/corpus/advisories.jsonl.gz
 fly ssh console -c infra/fly.toml -C "python -m vexpath_worker.main seed-advisories /data/corpus"
 ```
 
@@ -204,6 +204,13 @@ argument that looks like a Unix path into a Windows one, so
 "file does not exist" naming a path you never typed. It only mangles a path
 that stands alone as its own argument, which is why the `ssh -C "... /data/..."`
 lines work without it and the `sftp put` lines do not.
+
+**And set it per command rather than exporting it.** Exported, it also stops
+`/dev/null` being translated, so a Windows `curl -o /dev/null` fails with
+"client returned ERROR on write of 132 bytes" and takes the rest of an `&&`
+chain with it. The conversion is load-bearing for `/dev/null` and wrong for
+`/data`; turning it off globally just moves the breakage. A shell redirect
+(`> /dev/null`) is handled by bash and is unaffected either way.
 
 ## The free allowance, and the five-minute machine
 
