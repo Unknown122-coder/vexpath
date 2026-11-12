@@ -62,7 +62,14 @@ def test_unknown_variables_are_ignored(
 
 # --- Configuration that does nothing --------------------------------------
 
-#: Settings that are declared and that **nothing reads**.
+#: Settings whose **field** nothing reads.
+#:
+#: Not the same as "the environment variable does nothing", and the
+#: difference caught me out: two of these name variables the command line
+#: reads directly from ``os.environ`` with its own constants, so the variable
+#: is live while the field beside it is dead. Only ``github_token`` and the
+#: ``s3_*`` group are inert end to end -- zero references anywhere in the
+#: source.
 #:
 #: Asking an operator for a credential that does nothing is worse than not
 #: asking: they create it, store it, and believe it is load-bearing. The
@@ -76,14 +83,18 @@ def test_unknown_variables_are_ignored(
 #: this test, which is the reminder to fix the documentation at the same time.
 DECLARED_BUT_UNREAD = frozenset(
     {
-        # The export job and the seed job take the directory as a command
-        # argument, so this is never consulted. infra/fly.toml sets it anyway
-        # and used to carry a comment saying the worker reads it.
+        # The *field* is dead; the environment variable is not. The command
+        # line reads VEXPATH_ADVISORY_SNAPSHOT_DIR straight from os.environ
+        # with its own constant (vexpath/sources.py), so the variable works
+        # and this Settings field is a second name for it that nothing
+        # consults. Server-side there is no reader at all, which is why the
+        # entry in infra/fly.toml does nothing.
         "advisory_snapshot_dir",
         "github_token",
-        # Nothing threads this into the OSV client, which keeps its own
-        # default. Pointing the scanner at a mirror is therefore not possible
-        # yet, whatever the setting suggests.
+        # Same shape: VEXPATH_OSV_API_BASE is read by the command line
+        # (vexpath/sources.py) and pointing the scanner at a mirror does
+        # work. What nothing reads is this field, so a server-side component
+        # asking Settings for it would always get the default.
         "osv_api_base",
         "s3_access_key_id",
         "s3_bucket",

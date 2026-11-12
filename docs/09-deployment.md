@@ -28,7 +28,7 @@ healthy.
 | Thing | Why not |
 |---|---|
 | A Cloudflare R2 bucket | `VEXPATH_S3_*` exists in the configuration and **nothing reads it**: no artefact is written to object storage yet. Create it when something does, not before. |
-| A GitHub token | `VEXPATH_GITHUB_TOKEN` is declared and **nothing reads it**, like the S3 settings above. Symbol extraction talks to `git`, not to GitHub's API, so no rate limit applies to it. The setting is here for resolving tag references, which is not built yet. |
+| A GitHub token | `VEXPATH_GITHUB_TOKEN` has no reader anywhere in the source. Symbol extraction talks to `git`, not to GitHub's API, so no rate limit applies to it. The setting is here for resolving tag references, which is not built yet. |
 
 Put the Fly app in the **same region as the database**. Every request makes
 several round trips to Postgres, so the distance between them is paid
@@ -272,17 +272,23 @@ fly machine run . -c infra/fly.toml --schedule daily \
 The order that matters is sync → extract → export: without the export the
 extracted symbols never reach the tool that does the reaching.
 
-`VEXPATH_ADVISORY_SNAPSHOT_DIR` is read by **nothing at all**. Both the export
-job and the seed job take the directory as a command argument, which is why
-every command above names `/data/advisories` explicitly. The package pages are
-built from the database, so an empty volume on a first deploy breaks nothing
-either.
+`VEXPATH_ADVISORY_SNAPSHOT_DIR` is read by the **command line**, not by
+anything that runs here. `vexpath scan` picks it up from the environment and
+becomes reproducible and offline; the export and seed jobs take the directory
+as an argument instead, which is why every command above names
+`/data/advisories` explicitly. So the entry in `infra/fly.toml` does nothing —
+set the variable where you run the scanner, not where the server runs.
 
-Three settings are like this — that one, `VEXPATH_GITHUB_TOKEN` and the
-`VEXPATH_S3_*` group. They are declared, documented here as inert, and
-`packages/platform/tests/test_settings.py` fails if that stops being true in
-either direction: if one of them gains a reader, or if any other setting loses
-its last one.
+`VEXPATH_OSV_API_BASE` is the same: the command line reads it, so a mirror
+works; nothing server-side does.
+
+**Genuinely inert**, with no reader anywhere in the source: `VEXPATH_GITHUB_TOKEN`
+and the `VEXPATH_S3_*` group.
+
+`packages/platform/tests/test_settings.py` holds that list and fails in either
+direction — if one of those *fields* gains a reader, or if any other setting
+loses its last one. It distinguishes the field from the variable, because that
+distinction is exactly what I got wrong when I first wrote this paragraph.
 
 ## Running it by hand
 

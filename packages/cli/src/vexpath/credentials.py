@@ -34,7 +34,14 @@ KEY_ENVIRONMENT_VARIABLE = "VEXPATH_API_KEY"
 #: Where the platform lives, overridable for a self-hosted install.
 URL_ENVIRONMENT_VARIABLE = "VEXPATH_API_URL"
 
-DEFAULT_API_URL = "https://api.vexpath.dev"
+#: The deployment this tool talks to when nothing says otherwise.
+#:
+#: It was ``https://api.vexpath.dev`` until 2026-11-12, which is a hostname
+#: nobody owns: ``vexpath login`` stored it silently and the first upload
+#: failed with a DNS error naming a domain the user had never heard of. A
+#: default that points nowhere is worse than no default, because it fails
+#: later and somewhere else.
+DEFAULT_API_URL = "https://vexpath.fly.dev"
 
 #: Overrides the whole configuration directory, which is what a test needs and
 #: what a container with a read-only home directory needs too.
