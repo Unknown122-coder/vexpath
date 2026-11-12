@@ -398,3 +398,42 @@ def test_the_needs_attention_expression_matches_what_a_report_shows() -> None:
     assert not _passes(expression, REACHABLE_HIGH)
     assert not _passes(expression, OPEN_MEDIUM)
     assert _passes(expression, CLEARED)
+
+
+# --- The examples in the documentation have to be real --------------------
+
+
+def test_every_cel_example_in_the_docs_uses_fields_that_exist() -> None:
+    """A policy naming a field that does not exist never fires.
+
+    CEL compiles an unknown field without complaint, so
+    ``f.reachable == "confirmed"`` -- the shape documented in
+    docs/00-blueprint.md until 2026-11-12, where the field is really
+    ``f.reach.reachable`` and is a boolean -- produced a policy that passed
+    every scan. For a build gate that is the worst available failure: it
+    looks installed, it reports success, and it is not gating anything.
+
+    So every ``f.<field>`` written in the documentation is checked against
+    the context the evaluator actually builds.
+    """
+    import re
+    from pathlib import Path
+
+    from vexpath_core.policy import FINDING_FIELDS, REACH_FIELDS
+
+    docs = Path(__file__).resolve().parents[3] / "docs"
+    problems: list[str] = []
+
+    for path in sorted(docs.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"\bf\.([a-z_]+)(?:\.([a-z_]+))?", text):
+            first, second = match.group(1), match.group(2)
+            where = f"{path.name}: f.{first}" + (f".{second}" if second else "")
+            if first not in FINDING_FIELDS:
+                problems.append(f"{where} -- no such finding field")
+            elif second is not None and first == "reach" and second not in REACH_FIELDS:
+                problems.append(f"{where} -- no such reach field")
+
+    assert not problems, "documented policy examples name fields that do not exist: " + "; ".join(
+        problems
+    )

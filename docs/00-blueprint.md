@@ -68,7 +68,7 @@ Non-persona for v1: large enterprises needing on-prem deployment, SSO, and SLAs.
 5. **Policy engine**
    - Policies written in CEL (Common Expression Language) evaluated against the findings set.
    - Built-in policy presets: `strict`, `balanced`, `kev-only`.
-   - Example: `findings.exists(f, f.reachable == "confirmed" && f.severity >= "HIGH" && f.age_days > 14)` fails the build.
+   - Example: `findings.exists(f, f.reach.reachable && f.severity_rank >= 4 && f.age_days > 14)` fails the build. Reachability lives under `f.reach`, and severity is compared by `severity_rank` (CRITICAL 5, HIGH 4, MEDIUM 3) because comparing the strings puts MEDIUM above HIGH.
    - Output as GitHub Checks annotations and a PR comment.
 
 6. **Hosted platform**
