@@ -140,6 +140,70 @@ async def create_project(
     return await _fetch(connection, identifier)
 
 
+class PolicyOut(BaseModel):
+    """The policy a project is governed by."""
+
+    name: str
+    #: The expression itself, so a caller can evaluate it locally and get the
+    #: same answer the server would. A preset name resolves to its expression
+    #: before it leaves here: the client must not have to know the
+    #: vocabulary, and a preset that changes meaning in a later release must
+    #: not silently change what a stored policy does.
+    expression: str
+    version: int
+    source: str | None = None
+    created_at: datetime
+
+
+# Registered before the ``{slug:path}`` route below, which would otherwise
+# match "myproject/policy" as a slug -- ``:path`` matches slashes, so the
+# more specific route has to be declared first. The visibility route after
+# it escapes the problem only because it is a PUT.
+@router.get(
+    "/{slug:path}/policy",
+    response_model=PolicyOut,
+    summary="Read the policy that governs a project",
+)
+async def read_policy(slug: str, connection: TenantConnection) -> PolicyOut:
+    """The project's current policy, so a build can apply the same rule.
+
+    Exists so that a policy configured once in the dashboard governs every
+    scan, rather than depending on each caller passing the right ``--policy``
+    flag. ``vexpath scan --policy project`` reads this.
+
+    Raises:
+        HTTPException: 404 if the project does not exist for this
+            organisation, or if it has no policy. Those are deliberately the
+            same answer: a project with no policy has nothing to apply, and
+            the caller's next move is identical either way.
+    """
+    from vexpath_api.policy_pages import current_policy
+    from vexpath_core.policy import PRESETS
+
+    project = (
+        (await connection.execute(select(projects).where(projects.c.slug == slug)))
+        .mappings()
+        .one_or_none()
+    )
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such project")
+
+    stored = await current_policy(connection, project["id"])
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"project {slug!r} has no policy. Set one in the dashboard.",
+        )
+
+    return PolicyOut(
+        name=stored["name"],
+        expression=PRESETS.get(stored["cel"].strip(), stored["cel"]),
+        version=stored["version"],
+        source=stored["source"],
+        created_at=stored["created_at"],
+    )
+
+
 @router.get("/{slug:path}", response_model=ProjectOut, summary="Read one project")
 async def read_project(slug: str, connection: TenantConnection) -> ProjectOut:
     row = (

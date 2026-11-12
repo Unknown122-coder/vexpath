@@ -41,6 +41,7 @@ from vexpath_core.policy import (
     evaluate,
     explain,
     needs_attention_expression,
+    raw_context,
     severity_at_least,
 )
 
@@ -513,3 +514,39 @@ def test_the_honest_gate_refuses_what_it_could_not_clear(
         "findings.exists(f, f.reach.reachable || !f.reach.conclusive)", name="honest"
     )
     assert policy.evaluate_context(context).passed is not should_fail
+
+
+def test_a_boolean_survives_the_evaluation_path() -> None:
+    """``!`` and ``||`` on a boolean field, end to end from real results.
+
+    They did not, through one route. ``evaluate_context`` converts its input
+    on the way in, so a caller who helpfully passed ``build_context`` output
+    converted twice -- and celpy's ``BoolType`` subclasses ``int``, so the
+    second pass turned ``True`` into ``IntType(1)``. ``!IntType(1)`` has no
+    overload, and the policy was reported as one that "could not be
+    evaluated", which points at the expression rather than at the context.
+
+    The hosted platform evaluated project policies that way for exactly as
+    long as it took to write this test.
+    """
+    results = _results(_finding(Verdict.AFFECTED, status=ReachStatus.REACHABLE_CONFIRMED))
+    policy = compile_policy(
+        "findings.exists(f, f.reach.reachable || !f.reach.conclusive)", name="honest"
+    )
+
+    assert policy.evaluate_context(raw_context(results)).passed is False
+
+
+def test_the_inspection_context_is_not_an_evaluation_context() -> None:
+    """Pinning the trap, so a later refactor cannot quietly reintroduce it.
+
+    If celpy ever stops degrading a converted boolean, this test fails and
+    the warning on ``build_context`` can come off. Until then it is a loaded
+    gun pointed at every caller who reads the two names and assumes they
+    compose.
+    """
+    results = _results(_finding(Verdict.AFFECTED, status=ReachStatus.REACHABLE_CONFIRMED))
+    policy = compile_policy("findings.exists(f, !f.reach.conclusive)", name="negation")
+
+    with pytest.raises(PolicyError, match="could not be evaluated"):
+        policy.evaluate_context(build_context(results))

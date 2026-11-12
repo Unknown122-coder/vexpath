@@ -125,10 +125,11 @@ def command(
         typer.Option(
             "--policy",
             help=(
-                "The gate: a preset name, a CEL expression, or a path to a file "
-                "holding one. Exits 1 when it fails. Run 'vexpath policy list' to "
-                "see the presets. Without this, nothing is gated and the scan "
-                "only reports."
+                "The gate: 'project' to use the policy set in the dashboard for "
+                "--project, or a preset name, a CEL expression, or a path to a "
+                "file holding one. Exits 1 when it fails. Run 'vexpath policy "
+                "list' to see the presets. Without this, nothing is gated and "
+                "the scan only reports."
             ),
         ),
     ] = None,
@@ -179,6 +180,11 @@ def command(
     # --project discovered after a four-minute scan has thrown the scan away,
     # and the person who sees that message is already in a hurry.
     credential = _upload_credential(upload=upload, project=project)
+    # Before any analysis too, and for the same reason: a policy that cannot
+    # be fetched should not be discovered after a four-minute scan. This may
+    # resolve a credential even without --upload, because reading the
+    # project's policy is itself an authenticated call.
+    resolved_policy = _resolve_policy(policy, project=project, credential=credential)
 
     source = advisory_source(snapshot, result_noun="scan")
     scopes = (
@@ -190,7 +196,7 @@ def command(
         sbom_path=sbom,
         lockfile=lockfile,
         include_scopes=scopes,
-        policy=_resolve_policy(policy),
+        policy=resolved_policy,
         reachability=not no_reach,
         entry_points=tuple(
             entry.strip() for entry in (entry_point or "").split(",") if entry.strip()
@@ -262,15 +268,39 @@ def _upload(credential: credentials.Credential, project: str, results: object) -
     note(f"uploaded to {credential.api_url} as scan {scan_id}")
 
 
-def _resolve_policy(source: str | None) -> str | None:
+#: What ``--policy`` means when it means "ask the platform".
+PROJECT_POLICY = "project"
+
+
+def _resolve_policy(
+    source: str | None,
+    *,
+    project: str | None = None,
+    credential: object | None = None,
+) -> str | None:
     """Turn the flag into something the core can compile.
 
     A preset name wins over a file of the same name: the presets are a closed
     vocabulary, and a file called ``balanced`` in a working directory must not
     silently change what the default means.
+
+    ``--policy project`` fetches the expression the dashboard holds for
+    ``--project``, so a rule written once governs every build instead of
+    every build repeating it. Nothing local can shadow that word: it is
+    checked before the preset table and before the filesystem, because a file
+    called ``project`` quietly replacing the organisation's gate is exactly
+    the substitution this flag must not allow.
     """
     if source is None:
         return None
+
+    if source.strip() == PROJECT_POLICY:
+        if not project:
+            fail_config("--policy project needs --project to say which project's policy to use")
+        resolved = credential or auth.credential_or_exit()
+        assert isinstance(resolved, credentials.Credential)  # narrowed for the type checker
+        return auth.fetch_policy(resolved, project)
+
     if source in PRESETS:
         return source
     candidate = Path(source)

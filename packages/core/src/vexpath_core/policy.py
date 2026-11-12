@@ -246,11 +246,18 @@ def raw_context(results: ScanResults) -> dict[str, Any]:
 
 
 def build_context(results: ScanResults) -> dict[str, Any]:
-    """The same variables, converted for CEL.
+    """The same variables, converted for CEL. **For inspection only.**
 
-    Kept because it is the shape an expression actually runs against, and
-    because a caller inspecting what a policy can see should be able to look
-    at exactly that.
+    Useful for showing a caller what an expression can see, in the types the
+    evaluator will see them as.
+
+    **Do not pass this to** :meth:`CompiledPolicy.evaluate_context`, which
+    converts its own input. Converting twice is not a no-op: celpy's
+    ``BoolType`` subclasses ``int``, so a second pass turns ``True`` into
+    ``IntType(1)``, and an expression using ``!`` or ``||`` on it then fails
+    to evaluate -- reported as a policy that "could not be evaluated", which
+    sends you looking at the expression rather than at the context. Use
+    :func:`raw_context` for evaluation.
     """
     return {key: json_to_cel(value) for key, value in raw_context(results).items()}
 

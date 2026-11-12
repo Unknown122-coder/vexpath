@@ -620,3 +620,125 @@ def test_the_policy_page_is_behind_the_session(client: TestClient, project: str)
     response = client.get(f"/app/projects/{project}/policy")
     assert response.status_code == 303
     assert response.headers["location"].startswith("/login")
+
+
+def test_the_two_builders_agree_on_values_and_not_only_on_field_names() -> None:
+    """Same finding, same numbers, whichever builder produced it.
+
+    The parity test above compared keys, and keys were never the problem.
+    The dashboard kept its own rank tables -- CRITICAL 4, HIGH 3 -- while
+    the enum the command line uses says CRITICAL 5, HIGH 4. Every rank was
+    off by one and confidence was too, so `f.severity_rank >= 4` meant
+    "critical only" in a dry-run and "high or above" in CI. Same expression,
+    two answers, nothing logged, and a dry-run that proved nothing about the
+    build.
+
+    Compared for every severity and every reachability status, because the
+    divergence was uniform and a single sample would have missed none of it
+    -- but a single sample is also how it survived.
+    """
+    from vexpath_core.enums import (
+        Confidence,
+        ReachReason,
+        ReachStatus,
+        ScanMode,
+        Severity,
+        Verdict,
+    )
+    from vexpath_core.models.finding import (
+        AdvisoryRef,
+        ComponentRef,
+        Finding,
+        ReachabilityResult,
+    )
+    from vexpath_core.models.results import ProjectRef, ScanResults
+    from vexpath_core.policy import raw_context
+
+    for severity in Severity:
+        for status in ReachStatus:
+            row = {
+                "id": "01JFINDING",
+                "advisory_id": "CVE-2026-0001",
+                "severity": severity.value,
+                "cvss_v3_score": 7.5,
+                "epss_score": 0.2,
+                "kev": True,
+                "verdict": "affected",
+                "justification": None,
+                "fixed_in": "2.0.0",
+                "suppressed_by": None,
+                "created_at": datetime.now(UTC),
+                "component_name": "lib",
+                "component_version": "1.0.0",
+                "purl": "pkg:pypi/lib@1.0.0",
+                "ecosystem": "PyPI",
+                "direct": True,
+                "scope": "runtime",
+                "reach_status": status.value,
+                "reach_reason": (None if status.is_conclusive else ReachReason.NO_FIX_COMMIT.value),
+                "reach_confidence": Confidence.HIGH.value,
+                "shortest_path": [{"symbol": "a"}, {"symbol": "b"}],
+                "via_dynamic_edges": False,
+            }
+            dashboard = policy_pages._entry(row)
+
+            finding = Finding(
+                id="01JFINDING",
+                advisory=AdvisoryRef(
+                    id="CVE-2026-0001",
+                    severity=severity,
+                    kev=True,
+                    epss_score=0.2,
+                    cvss_v3_score=7.5,
+                ),
+                component=ComponentRef(
+                    purl="pkg:pypi/lib@1.0.0",
+                    ecosystem="PyPI",
+                    name="lib",
+                    version="1.0.0",
+                    direct=True,
+                ),
+                verdict=Verdict.AFFECTED,
+                fixed_in="2.0.0",
+                reach=ReachabilityResult(
+                    status=status,
+                    confidence=Confidence.HIGH,
+                    # The model refuses a reachable result that names no
+                    # symbols, which is the right refusal.
+                    matched_symbols=["lib.danger"] if status.is_reachable else [],
+                    # reachable_possible means precisely that the path went
+                    # through an edge the analysis could not resolve, and the
+                    # model holds that invariant rather than trusting callers.
+                    # And an unreachable one must name what it searched
+                    # for, so that "no path" is a claim with evidence.
+                    searched_symbols=(["lib.danger"] if status is ReachStatus.UNREACHABLE else []),
+                    # An inconclusive status has to say why it could not
+                    # conclude, which is the difference between this and a
+                    # scanner that shrugs.
+                    reason=(None if status.is_conclusive else ReachReason.NO_FIX_COMMIT),
+                    via_dynamic_edges=status is ReachStatus.REACHABLE_POSSIBLE,
+                ),
+            )
+            command_line = raw_context(
+                ScanResults(
+                    schema_version="vexpath.results/1",
+                    core_version="0.1.1",
+                    generated_at=datetime.now(UTC),
+                    mode=ScanMode.CLI,
+                    project=ProjectRef(),
+                    findings=[finding],
+                )
+            )["findings"][0]
+
+            for name in ("severity", "severity_rank", "kev", "verdict"):
+                assert dashboard[name] == command_line[name], (
+                    f"{severity.value}: {name} differs between the dashboard "
+                    f"({dashboard[name]!r}) and the command line "
+                    f"({command_line[name]!r})"
+                )
+            for name in ("reachable", "conclusive", "confidence_rank", "status"):
+                assert dashboard["reach"][name] == command_line["reach"][name], (
+                    f"{status.value}: reach.{name} differs between the dashboard "
+                    f"({dashboard['reach'][name]!r}) and the command line "
+                    f"({command_line['reach'][name]!r})"
+                )

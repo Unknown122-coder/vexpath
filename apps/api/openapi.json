@@ -313,6 +313,47 @@
         "title": "PathStepOut",
         "type": "object"
       },
+      "PolicyOut": {
+        "description": "The policy a project is governed by.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "expression",
+          "version",
+          "created_at"
+        ],
+        "title": "PolicyOut",
+        "type": "object"
+      },
       "ProjectIn": {
         "description": "What a caller supplies to create or update a project.",
         "properties": {
@@ -1513,6 +1554,65 @@
           }
         },
         "summary": "Read one project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/v1/projects/{slug}/policy": {
+      "get": {
+        "description": "The project's current policy, so a build can apply the same rule.\n\nExists so that a policy configured once in the dashboard governs every\nscan, rather than depending on each caller passing the right ``--policy``\nflag. ``vexpath scan --policy project`` reads this.\n\nRaises:\n    HTTPException: 404 if the project does not exist for this\n        organisation, or if it has no policy. Those are deliberately the\n        same answer: a project with no policy has nothing to apply, and\n        the caller's next move is identical either way.",
+        "operationId": "read_policy_v1_projects__slug__policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read the policy that governs a project",
         "tags": [
           "projects"
         ]

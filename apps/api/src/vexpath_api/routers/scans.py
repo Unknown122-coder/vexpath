@@ -18,6 +18,7 @@ rather than as a broken upload.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -28,10 +29,12 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from vexpath_api.auth import Authenticated, TenantConnection
 from vexpath_api.dependencies import get_engine, get_settings_from_app
+from vexpath_api.policy_pages import current_policy
 from vexpath_api.webhooks import dispatch
 from vexpath_core.enums import Verdict
 from vexpath_core.ids import new_ulid
 from vexpath_core.models.results import ScanResults
+from vexpath_core.policy import PolicyError, compile_policy, raw_context
 from vexpath_db.tables import (
     audit_log,
     components,
@@ -385,6 +388,9 @@ async def _store(
                 id=new_ulid(),
                 org_id=org_id,
                 scan_id=scan_id,
+                # Null: this is whatever policy the *client* chose to run,
+                # which may be the default preset or none at all. It is not
+                # the project's own policy, which is evaluated below.
                 policy_id=None,
                 cel=results.policy.name,
                 passed=results.policy.passed,
@@ -393,6 +399,8 @@ async def _store(
                 ],
             )
         )
+
+    await _apply_project_policy(connection, scan_id, project, results, org_id)
 
     await connection.execute(
         insert(audit_log).values(
@@ -411,6 +419,77 @@ async def _store(
                 "reproducible": results.is_reproducible,
             },
         )
+    )
+
+
+async def _apply_project_policy(
+    connection: AsyncConnection,
+    scan_id: str,
+    project: Mapping[str, Any],
+    results: ScanResults,
+    org_id: str,
+) -> None:
+    """Evaluate the project's own policy against an arriving scan.
+
+    Until this existed, a policy written in the dashboard was stored,
+    displayed, dry-run -- and enforced nowhere. Every row in
+    ``policy_evaluations`` carried a null ``policy_id``, because the only
+    evaluation recorded was the client's own, and the client runs whichever
+    policy it was told to on the command line. Somebody could configure a
+    gate here, see it dry-run correctly against a real scan, save it, and
+    have it govern nothing.
+
+    Evaluated here rather than trusted from the client because the point of
+    a policy stored centrally is that it does not depend on the caller
+    passing the right flag.
+
+    **Never fatal.** A stored expression that no longer compiles -- a field
+    renamed, a preset withdrawn -- must not reject the upload. The scan is
+    evidence; the policy is an opinion about it, and losing the evidence
+    because the opinion stopped parsing is the wrong trade. It is logged at
+    warning instead, and the dashboard shows the policy page as the place to
+    fix it.
+    """
+    stored = await current_policy(connection, project["id"])
+    if stored is None:
+        return
+
+    try:
+        compiled = compile_policy(stored["cel"], name=stored["name"])
+        # raw_context, not build_context: the evaluator converts on the
+        # way in, so handing it already-converted values converts twice
+        # and celpy's BoolType -- an int subclass -- degrades to
+        # IntType(1). The policy then fails to evaluate at all.
+        evaluation = compiled.evaluate_context(raw_context(results))
+    except PolicyError as exc:
+        log.warning(
+            "api.scan.project_policy_unusable",
+            project=project["slug"],
+            policy=stored["name"],
+            version=stored["version"],
+            error=str(exc),
+        )
+        return
+
+    await connection.execute(
+        insert(policy_evaluations).values(
+            id=new_ulid(),
+            org_id=org_id,
+            scan_id=scan_id,
+            # Set, which is what distinguishes this row from the client's.
+            policy_id=stored["id"],
+            cel=stored["cel"],
+            passed=evaluation.passed,
+            violations=[violation.model_dump(mode="json") for violation in evaluation.violations],
+        )
+    )
+    log.info(
+        "api.scan.project_policy",
+        project=project["slug"],
+        policy=stored["name"],
+        version=stored["version"],
+        passed=evaluation.passed,
+        violations=len(evaluation.violations),
     )
 
 

@@ -633,3 +633,150 @@ def test_one_organisation_cannot_read_anothers_finding_by_id(
 
     response = client.get(f"/v1/findings/{rows[0]['id']}", headers=_headers(keys[ORG_B]))
     assert response.status_code == 404
+
+
+# --- The project's own policy ---------------------------------------------
+#
+# A policy written in the dashboard was stored, displayed, dry-run and
+# enforced nowhere: every policy_evaluations row carried a null policy_id,
+# because the only evaluation recorded was the client's own and the client
+# runs whatever its command line said. These cover the two halves of the fix
+# -- the server applying it on arrival, and the endpoint that lets a build
+# apply the same rule.
+
+
+def _store_policy(url: str, org: str, project_id: str, cel: str, *, name: str = "custom") -> str:
+    from vexpath_db.tables import policies
+
+    policy_id = new_ulid()
+    engine = create_sync_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                insert(policies).values(
+                    id=policy_id,
+                    org_id=org,
+                    project_id=project_id,
+                    name=name,
+                    cel=cel,
+                    version=1,
+                    # Only "repo" or "dashboard"; a check constraint
+                    # allows nothing else.
+                    source="dashboard",
+                )
+            )
+    finally:
+        engine.dispose()
+    return policy_id
+
+
+def _evaluations(url: str, scan_id: str) -> list[dict[str, Any]]:
+    from vexpath_db.tables import policy_evaluations
+
+    engine = create_sync_engine(url)
+    try:
+        with engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    select(policy_evaluations).where(policy_evaluations.c.scan_id == scan_id)
+                )
+                .mappings()
+                .all()
+            )
+    finally:
+        engine.dispose()
+    return [dict(row) for row in rows]
+
+
+def test_the_projects_own_policy_is_evaluated_when_a_scan_arrives(
+    client: TestClient, keys: dict[str, str], integration_database_url: str
+) -> None:
+    """The point of a policy stored centrally is not depending on the caller.
+
+    Before this, a gate configured in the dashboard governed nothing: the
+    stored expression was read by the editor page and by nothing else.
+    """
+    project = _create_project(client, keys[ORG_A], "svc")
+    policy_id = _store_policy(
+        integration_database_url,
+        ORG_A,
+        project["id"],
+        "findings.exists(f, f.reach.reachable || !f.reach.conclusive)",
+    )
+
+    scan = client.post(
+        "/v1/scans",
+        json={"project": "svc", "results": _results(findings=3)},
+        headers=_headers(keys[ORG_A]),
+    )
+    assert scan.status_code == 201, scan.text
+
+    rows = _evaluations(integration_database_url, scan.json()["id"])
+    stored = [row for row in rows if row["policy_id"] == policy_id]
+    assert len(stored) == 1, "the project's policy was not evaluated on arrival"
+    # The fixture's findings are reachable_confirmed, so the gate must fail.
+    assert stored[0]["passed"] is False
+    assert stored[0]["violations"]
+
+
+def test_a_project_policy_that_no_longer_compiles_does_not_reject_the_scan(
+    client: TestClient, keys: dict[str, str], integration_database_url: str
+) -> None:
+    """The scan is evidence; the policy is an opinion about it.
+
+    Losing the evidence because the opinion stopped parsing is the wrong
+    trade, and a field rename is enough to cause it.
+    """
+    project = _create_project(client, keys[ORG_A], "svc")
+    _store_policy(integration_database_url, ORG_A, project["id"], "findings.exists(f, f.")
+
+    scan = client.post(
+        "/v1/scans",
+        json={"project": "svc", "results": _results(findings=1)},
+        headers=_headers(keys[ORG_A]),
+    )
+
+    assert scan.status_code == 201, scan.text
+    rows = _evaluations(integration_database_url, scan.json()["id"])
+    assert all(row["policy_id"] is None for row in rows)
+
+
+def test_a_build_can_read_the_policy_it_should_apply(
+    client: TestClient, keys: dict[str, str], integration_database_url: str
+) -> None:
+    """A preset name resolves to its expression before it leaves the server.
+
+    The client must not have to know the preset vocabulary, and a preset
+    whose meaning changes in a later release must not silently change what a
+    stored policy does.
+    """
+    project = _create_project(client, keys[ORG_A], "svc")
+    _store_policy(integration_database_url, ORG_A, project["id"], "kev-only", name="kev-only")
+
+    response = client.get("/v1/projects/svc/policy", headers=_headers(keys[ORG_A]))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["name"] == "kev-only"
+    assert body["expression"].startswith("findings.exists(")
+    assert "kev" in body["expression"]
+    assert body["version"] == 1
+
+
+def test_a_project_without_a_policy_has_nothing_to_apply(
+    client: TestClient, keys: dict[str, str]
+) -> None:
+    _create_project(client, keys[ORG_A], "svc")
+    response = client.get("/v1/projects/svc/policy", headers=_headers(keys[ORG_A]))
+    assert response.status_code == 404
+
+
+def test_one_organisation_cannot_read_anothers_policy(
+    client: TestClient, keys: dict[str, str], integration_database_url: str
+) -> None:
+    project = _create_project(client, keys[ORG_A], "secret-service")
+    _store_policy(integration_database_url, ORG_A, project["id"], "findings.exists(f, f.kev)")
+
+    response = client.get("/v1/projects/secret-service/policy", headers=_headers(keys[ORG_B]))
+
+    assert response.status_code == 404

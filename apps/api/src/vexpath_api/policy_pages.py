@@ -27,6 +27,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from vexpath_core.enums import Confidence, ReachStatus, Severity
 from vexpath_core.policy import (
     DEFAULT_PRESET,
     PRESETS,
@@ -149,9 +150,18 @@ async def context_for_scan(connection: AsyncConnection, scan: Any) -> dict[str, 
     }
 
 
-_SEVERITY_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 0}
-_CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1}
-_REACHABLE = {"reachable_confirmed", "reachable_possible"}
+# Derived from the enums rather than written out, because writing them out
+# is how they came to disagree. These were CRITICAL 4 / HIGH 3 / MEDIUM 2
+# while the enum said CRITICAL 5 / HIGH 4 / MEDIUM 3 -- every rank off by
+# one, NONE missing entirely, and confidence off by one as well. So
+# `f.severity_rank >= 4` meant "critical only" in the dashboard's dry-run
+# and "high or above" in CI: the same expression, two answers, no error
+# anywhere. The parity test next to this only compared field *names*, which
+# is why it passed for weeks.
+_SEVERITY_RANK = {severity.value: severity.rank for severity in Severity}
+_CONFIDENCE_RANK = {confidence.value: confidence.rank for confidence in Confidence}
+_REACHABLE = {status.value for status in ReachStatus if status.is_reachable}
+_CONCLUSIVE = {status.value for status in ReachStatus if status.is_conclusive}
 
 
 def _entry(row: Any) -> dict[str, Any]:
@@ -192,6 +202,7 @@ def _entry(row: Any) -> dict[str, Any]:
         "suppressed": row["suppressed_by"] is not None,
         "reach": {
             "analysed": analysed,
+            "conclusive": row["reach_status"] in _CONCLUSIVE,
             "status": row["reach_status"] or "",
             "reason": row["reach_reason"] or "",
             "confidence": confidence,

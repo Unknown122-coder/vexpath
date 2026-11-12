@@ -187,6 +187,44 @@ def _environment() -> dict[str, str]:
     return dict(os.environ)
 
 
+def fetch_policy(credential: credentials.Credential, project: str) -> str:
+    """Read the expression a project is governed by.
+
+    So that a policy set once in the dashboard governs every build, instead
+    of every build having to be told the rule on its command line. The
+    expression is returned rather than the preset name: the answer must not
+    depend on the client's idea of what a preset means.
+    """
+    try:
+        with httpx.Client(timeout=_TIMEOUT, follow_redirects=True) as client:
+            response = client.get(
+                f"{credential.api_url}/v1/projects/{project}/policy",
+                headers={"Authorization": f"Bearer {credential.secret}"},
+            )
+    except httpx.HTTPError as exc:
+        fail(f"{credential.api_url} could not be reached for the project policy: {exc}")
+
+    if response.status_code == 401:
+        fail_config("the platform rejected the credential. Run 'vexpath login' again.")
+    if response.status_code == 404:
+        fail_config(
+            f"no policy for project {project!r}. Either the project does not exist "
+            f"in this organisation, or it has no policy yet -- set one in the "
+            f"dashboard, or drop --policy project to use the default."
+        )
+    if response.status_code >= 400:
+        fail(f"the project policy could not be read: {response.status_code}")
+
+    try:
+        expression = str(response.json()["expression"])
+    except (ValueError, KeyError, TypeError):
+        fail("the platform returned a policy this build cannot read")
+
+    if not expression.strip():
+        fail_config(f"project {project!r} has an empty policy, which gates nothing")
+    return expression
+
+
 def upload_results(
     credential: credentials.Credential, project: str, results: Mapping[str, Any]
 ) -> dict[str, Any]:
