@@ -16,6 +16,17 @@ import pytest
 
 from vexpath_platform.eventloop import configure_event_loop
 
+# Colour off, before anything imports rich or typer. Those libraries decide
+# at import time whether to emit escape codes, and they honour FORCE_COLOR
+# from the surrounding environment -- so a suite that asserts on the text of
+# a CLI message passes or fails according to the terminal that happened to
+# start it. Six tests failed exactly that way, with FORCE_COLOR=3 inherited
+# from an editor's integrated shell, in a session where nothing about the
+# code had changed.
+os.environ.pop("FORCE_COLOR", None)
+os.environ.setdefault("NO_COLOR", "1")
+os.environ.setdefault("TERM", "dumb")
+
 # Windows defaults to an event loop psycopg's asynchronous mode cannot use, so
 # every asynchronous database test would fail with an interface error naming
 # the loop and not the remedy. Set once, at collection, for the whole run.

@@ -108,3 +108,38 @@ def test_every_internal_link_in_a_template_resolves() -> None:
     assert not broken, "templates link to routes this application does not serve: " + ", ".join(
         broken
     )
+
+
+def test_the_home_page_shows_output_before_it_explains_itself() -> None:
+    """A visitor sees what the tool says before reading how it works.
+
+    The page was six headings of argument -- "most of your alerts cannot hurt
+    you", then Inventory, Match, Reach, Prove -- and no example of the thing
+    anywhere. Somebody arriving had nothing to look at and nowhere to go.
+    """
+    settings = Settings(
+        env=Environment.PRODUCTION,
+        secret_key="a-real-secret-for-this-test",
+        base_url="https://example.test",
+        database_url="postgresql+psycopg://nobody@127.0.0.1:1/none",
+    )
+    app = create_app(settings)
+    template = (TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
+
+    # Real output, including the line that distinguishes "no path exists"
+    # from "nobody looked".
+    assert "reachable_confirmed" in template
+    assert "present and was" in template
+    assert "traversed" in template
+
+    # And it comes first.
+    assert template.index("What it actually says") < template.index("How a verdict is reached")
+
+    # The search form has somewhere to go.
+    assert any(
+        route.matches({"type": "http", "method": "GET", "path": "/packages", "headers": []})[
+            0
+        ].value
+        >= 2
+        for route in app.router.routes
+    )

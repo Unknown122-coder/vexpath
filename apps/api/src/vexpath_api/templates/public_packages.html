@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{% if query %}Packages matching {{ query }}{% else %}Packages with vulnerable symbols{% endif %}{% endblock %}
+
+{% block content %}
+<section class="hero narrow">
+  <h1>Which functions each fix changed</h1>
+  <p class="lead">
+    {{ "{:,}".format(total) }} packages have had the functions behind their
+    advisories extracted, by diffing the upstream commit that fixed each one.
+    That is what a reachability check searches your call graph for.
+  </p>
+  <form class="search" action="/packages" method="get" role="search">
+    <label for="q">Find a package</label>
+    <input id="q" name="q" type="search" value="{{ query or '' }}"
+           placeholder="django, requests, aiohttp…" autocomplete="off" spellcheck="false">
+    <button class="button" type="submit">Search</button>
+  </form>
+</section>
+
+<section class="panel narrow">
+  {% if query %}
+    <h2>{{ "{:,}".format(matches) }} package{{ '' if matches == 1 else 's' }} matching “{{ query }}”</h2>
+    {% if not rows %}
+    <p class="notice">
+      Nothing matching <code>{{ query }}</code> has extracted symbols yet. That is
+      the ordinary state for most packages: extraction is a long crawl over
+      upstream repositories and works through the corpus over time. It does not
+      mean the package has no advisories — only that none of them has had its
+      fix commit read.
+    </p>
+    {% endif %}
+  {% else %}
+    <h2>Most advisories first</h2>
+  {% endif %}
+
+  {% if rows %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th scope="col">Package</th>
+        <th scope="col">Ecosystem</th>
+        <th scope="col">Advisories</th>
+        <th scope="col">Functions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="/package/{{ row.ecosystem }}/{{ row.package_name }}">{{ row.package_name }}</a></td>
+        <td>{{ row.ecosystem }}</td>
+        <td>{{ row.advisories }}</td>
+        <td>{{ row.symbols }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="meta">
+    Showing {{ rows | length }} of {{ "{:,}".format(matches if query else total) }}.
+    {% if previous_page is not none %}
+    <a href="/packages?{{ query_string }}page={{ previous_page }}">Previous</a>
+    {% endif %}
+    {% if next_page is not none %}
+    <a href="/packages?{{ query_string }}page={{ next_page }}">Next</a>
+    {% endif %}
+  </p>
+  {% endif %}
+</section>
+
+<section class="panel narrow">
+  <h2>What a count here does and does not mean</h2>
+  <p>
+    A function listed for an advisory is evidence about the fix, not a claim
+    about your project. Whether any of it can run in your code depends on your
+    call graph, which is what <code>vexpath scan</code> works out locally.
+  </p>
+  <p class="hint">
+    A large number of functions usually means the fix was part of a wider
+    change, not that the package is especially dangerous. Where a release had to
+    be diffed because the advisory named no commit, the symbols say
+    <code>tag_diff</code> and are recorded at low confidence.
+  </p>
+</section>
+{% endblock %}

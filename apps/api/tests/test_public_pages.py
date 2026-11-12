@@ -503,3 +503,117 @@ def test_a_package_name_is_escaped(client: TestClient) -> None:
     response = client.get("/package/PyPI/%3Cscript%3Ealert(1)%3C%2Fscript%3E")
     assert "<script>alert" not in response.text
     assert "&lt;script&gt;" in response.text
+
+
+# --- The package index ----------------------------------------------------
+#
+# 733 packages had their vulnerable functions extracted and the only way to
+# see one was to type /package/PyPI/<name> into the address bar. Nothing
+# linked there and nothing searched, so the most useful public thing here was
+# invisible. These cover the page that fixed that.
+
+INDEX_PREFIX = "zzindex"
+
+
+@pytest.fixture
+def corpus(database: Engine) -> Iterator[None]:
+    """Three packages in the global corpus, with different symbol counts."""
+    from vexpath_core.ids import new_ulid
+    from vexpath_db.tables import advisories, vulnerable_symbols
+
+    shape = {f"{INDEX_PREFIX}-busy": 3, f"{INDEX_PREFIX}-quiet": 1, f"{INDEX_PREFIX}-middle": 2}
+    _wipe_corpus(database)
+    with database.begin() as connection:
+        for package, count in shape.items():
+            for index in range(count):
+                advisory_id = f"CVE-2099-{abs(hash((package, index))) % 90000 + 10000}"
+                connection.execute(
+                    insert(advisories).values(
+                        id=advisory_id, summary=f"{package} problem", severity="HIGH"
+                    )
+                )
+                connection.execute(
+                    insert(vulnerable_symbols).values(
+                        id=new_ulid(),
+                        advisory_id=advisory_id,
+                        ecosystem="PyPI",
+                        package_name=package,
+                        symbol=f"{package}.handler{index}",
+                        kind="function",
+                        source="fix_commit",
+                        confidence="high",
+                    )
+                )
+    yield
+    _wipe_corpus(database)
+
+
+def _wipe_corpus(engine: Engine) -> None:
+    from vexpath_db.tables import advisories, vulnerable_symbols
+
+    with engine.begin() as connection:
+        connection.execute(
+            delete(vulnerable_symbols).where(
+                vulnerable_symbols.c.package_name.like(f"{INDEX_PREFIX}%")
+            )
+        )
+        connection.execute(delete(advisories).where(advisories.c.summary.like(f"{INDEX_PREFIX}%")))
+
+
+def test_the_index_lists_packages_with_the_most_advisories_first(
+    client: TestClient, corpus: None
+) -> None:
+    body = client.get("/packages").text
+
+    assert f"/package/PyPI/{INDEX_PREFIX}-busy" in body
+    assert f"/package/PyPI/{INDEX_PREFIX}-quiet" in body
+    # Busiest first: a package with many advisories is the one somebody is
+    # most likely looking for.
+    assert body.index(f"{INDEX_PREFIX}-busy") < body.index(f"{INDEX_PREFIX}-quiet")
+
+
+def test_a_partial_name_finds_the_package(client: TestClient, corpus: None) -> None:
+    """What somebody typing into a box means by "djan"."""
+    body = client.get(f"/packages?q={INDEX_PREFIX}-bu").text
+
+    assert f"/package/PyPI/{INDEX_PREFIX}-busy" in body
+    assert f"{INDEX_PREFIX}-quiet" not in body
+
+
+def test_a_search_with_no_matches_explains_itself(client: TestClient, corpus: None) -> None:
+    """Not a 404, and not an empty table.
+
+    Most packages have no extracted symbols, and the reason is worth saying:
+    it does not mean the package has no advisories, only that none of them has
+    had its fix commit read yet.
+    """
+    body = client.get("/packages?q=nothinglikethisexists").text
+
+    assert "has extracted symbols yet" in body
+    assert "has no advisories" in body
+
+
+def test_a_wildcard_in_the_query_matches_nothing_in_particular(
+    client: TestClient, corpus: None
+) -> None:
+    """``%`` is a SQL wildcard, and an unescaped one matches every package.
+
+    Not a security hole -- the corpus is public -- but a search box that
+    returns everything for a stray character is a broken search box.
+    """
+    body = client.get("/packages?q=%25").text
+
+    assert f"{INDEX_PREFIX}-busy" not in body
+    assert "has extracted symbols yet" in body
+
+
+def test_the_home_page_offers_the_search(client: TestClient, corpus: None) -> None:
+    """The index is useless if nothing points at it.
+
+    Two links and a form: the navigation, the home page's search box, and a
+    "browse the corpus" link for somebody who does not know what to type.
+    """
+    body = client.get("/").text
+
+    assert 'action="/packages"' in body
+    assert 'href="/packages"' in body

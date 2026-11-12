@@ -9,25 +9,40 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import func, select
 
 from vexpath_api.api_reference import sections
+from vexpath_api.auth import PublicConnection
 from vexpath_api.dependencies import get_settings_from_app
 from vexpath_api.templating import render
 from vexpath_core import __version__ as core_version
 from vexpath_core.enums import REACHABILITY_ECOSYSTEMS
+from vexpath_db.tables import vulnerable_symbols
 
 router = APIRouter(include_in_schema=False)
 
 
 @router.get("/", response_class=HTMLResponse, summary="Home page")
-async def home(request: Request) -> HTMLResponse:
-    """The public home page."""
+async def home(request: Request, connection: PublicConnection) -> HTMLResponse:
+    """The public home page.
+
+    Takes the public connection for one number: how many packages have had
+    their vulnerable functions extracted. A claim about the corpus should be
+    counted rather than written down, because a number in a template is
+    wrong the day after it is typed.
+    """
+    packages = (
+        await connection.execute(
+            select(func.count(func.distinct(vulnerable_symbols.c.package_name)))
+        )
+    ).scalar_one()
     return render(
         request,
         "index.html",
         {
             "core_version": core_version,
             "reachability_ecosystems": sorted(REACHABILITY_ECOSYSTEMS),
+            "package_count": packages,
         },
     )
 

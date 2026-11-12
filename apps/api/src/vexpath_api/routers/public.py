@@ -221,6 +221,98 @@ def _escape(value: str) -> str:
     )
 
 
+#: Packages listed on one page of the index.
+#:
+#: Enough to browse, few enough that the page stays a page. The corpus is
+#: 733 packages and growing; the search box is how somebody finds a specific
+#: one, and this is how they find out what is there at all.
+PACKAGES_PER_PAGE = 50
+
+
+@router.get(
+    "/packages",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+    summary="Packages with extracted symbols",
+)
+async def packages_index(
+    request: Request,
+    connection: PublicConnection,
+    q: Annotated[str, Query(max_length=100)] = "",
+    page: Annotated[int, Query(ge=1, le=200)] = 1,
+) -> HTMLResponse:
+    """The corpus, browsable.
+
+    This page exists because the most useful public thing here was
+    unreachable: 733 packages had their vulnerable functions extracted and the
+    only way to see any of them was to type ``/package/PyPI/django`` into the
+    address bar. Nothing linked there, and nothing searched.
+
+    A plain form and a table. The query is a prefix-or-contains match on a
+    normalised name, which is what somebody typing "django" into a box means,
+    and the page is rendered whole: no second request, so it works in a text
+    browser and can be read by a crawler.
+    """
+    query = q.strip().lower()
+
+    grouped = (
+        select(
+            vulnerable_symbols.c.package_name.label("package_name"),
+            vulnerable_symbols.c.ecosystem.label("ecosystem"),
+            func.count(func.distinct(vulnerable_symbols.c.advisory_id)).label("advisories"),
+            func.count(vulnerable_symbols.c.id).label("symbols"),
+        )
+        .group_by(vulnerable_symbols.c.package_name, vulnerable_symbols.c.ecosystem)
+        .subquery()
+    )
+
+    conditions = []
+    if query:
+        # Names are stored normalised, so a bare substring match is enough
+        # and needs no collation games. Escaped, because a name arriving with
+        # a percent sign in it would otherwise match everything.
+        pattern = f"%{query.replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%"
+        conditions.append(grouped.c.package_name.like(pattern, escape=chr(92)))
+
+    matches = (
+        await connection.execute(select(func.count()).select_from(grouped).where(*conditions))
+    ).scalar_one()
+    total = (await connection.execute(select(func.count()).select_from(grouped))).scalar_one()
+
+    rows = (
+        await connection.execute(
+            select(grouped)
+            .where(*conditions)
+            # Most advisories first: a package with a hundred of them is the
+            # one somebody is most likely to be looking for. Name breaks the
+            # tie so the order is stable between pages.
+            .order_by(
+                grouped.c.advisories.desc(),
+                grouped.c.symbols.desc(),
+                grouped.c.package_name.asc(),
+            )
+            .limit(PACKAGES_PER_PAGE)
+            .offset((page - 1) * PACKAGES_PER_PAGE)
+        )
+    ).mappings()
+    listed = [dict(row) for row in rows]
+
+    shown_through = (page - 1) * PACKAGES_PER_PAGE + len(listed)
+    return render(
+        request,
+        "public_packages.html",
+        {
+            "rows": listed,
+            "query": q.strip(),
+            "query_string": f"q={q.strip()}&" if q.strip() else "",
+            "total": total,
+            "matches": matches,
+            "previous_page": page - 1 if page > 1 else None,
+            "next_page": page + 1 if shown_through < matches else None,
+        },
+    )
+
+
 @router.get(
     "/package/{ecosystem}/{name:path}",
     response_class=HTMLResponse,

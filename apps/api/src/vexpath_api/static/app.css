@@ -563,3 +563,63 @@ code {
   font-size: 0.8125rem;
   overflow-wrap: anywhere;
 }
+
+/* A search row: label above, field and button side by side, stacking on a
+   narrow screen. No script, so the button is the only way to submit and has
+   to be visible. */
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin: var(--gap) 0 0;
+}
+
+.search label {
+  flex: 1 0 100%;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.search input[type="search"] {
+  flex: 1 1 18rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.search input[type="search"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.search .button {
+  flex: 0 0 auto;
+}
+
+/* A sample of real tool output. Scrolls sideways rather than wrapping: a
+   wrapped transcript stops being readable as columns, and the columns are
+   what make it legible at a glance. */
+.transcript {
+  margin: var(--gap) 0;
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.transcript code {
+  padding: 0;
+  background: none;
+  white-space: pre;
+}
