@@ -230,6 +230,31 @@ class ReachStatus(StrEnum):
     GRAPH_INCOMPLETE = "graph_incomplete"
 
     @property
+    def is_conclusive(self) -> bool:
+        """Whether the analysis reached an answer, either way.
+
+        ``reachable_confirmed``, ``reachable_possible`` and ``unreachable``
+        are answers. ``symbols_unknown`` and ``graph_incomplete`` are not:
+        the first means the advisory never said which functions its fix
+        changed, the second that the call graph could not be completed. Both
+        are "nobody could look", which this project insists is a different
+        statement from "not reachable" -- and the distinction is only useful
+        if a policy can express it.
+
+        It exists because ``analysed`` could not do this job despite its
+        docstring claiming to. ``analysed`` is true whenever reachability
+        *ran*, and it runs for ``symbols_unknown``: it runs, finds nothing to
+        search for, and says so. A gate written as ``reachable ||
+        !analysed`` therefore passes a finding nobody could clear, which is
+        the exact failure this tool exists to prevent.
+        """
+        return self in {
+            ReachStatus.REACHABLE_CONFIRMED,
+            ReachStatus.REACHABLE_POSSIBLE,
+            ReachStatus.UNREACHABLE,
+        }
+
+    @property
     def is_reachable(self) -> bool:
         return self in {ReachStatus.REACHABLE_CONFIRMED, ReachStatus.REACHABLE_POSSIBLE}
 

@@ -160,8 +160,12 @@ limit for unauthenticated API calls has nothing to do with this job. Measured:
 What it is, is long. It is resumable precisely because no single run finishes,
 and the backlog is thousands of advisories deep.
 
-Until it has run, every scan reports `reach.analysed = false` -- "nobody
-looked", which is deliberately not the same answer as "not reachable".
+Until it has run, every finding comes back `symbols_unknown`: reachability
+ran, found that the advisory never said which functions its fix changed, and
+reported that rather than guessing. In a policy that is `!f.reach.conclusive`
+-- "nobody could look" -- which is deliberately not the same answer as "not
+reachable". It is **not** `reach.analysed = false`; that field is true here,
+because the analysis did run.
 
 ## Shipping a corpus you extracted somewhere else
 

@@ -437,3 +437,79 @@ def test_every_cel_example_in_the_docs_uses_fields_that_exist() -> None:
     assert not problems, "documented policy examples name fields that do not exist: " + "; ".join(
         problems
     )
+
+
+# --- "not reachable" is not "nobody could look" ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusive"),
+    [
+        (ReachStatus.REACHABLE_CONFIRMED, True),
+        (ReachStatus.REACHABLE_POSSIBLE, True),
+        (ReachStatus.UNREACHABLE, True),
+        (ReachStatus.SYMBOLS_UNKNOWN, False),
+        (ReachStatus.GRAPH_INCOMPLETE, False),
+    ],
+)
+def test_only_an_answer_counts_as_conclusive(status: ReachStatus, conclusive: bool) -> None:
+    assert status.is_conclusive is conclusive
+
+
+@pytest.mark.parametrize(
+    ("status", "should_fail"),
+    [
+        # Reachable: the vulnerable code can run.
+        (ReachStatus.REACHABLE_CONFIRMED, True),
+        (ReachStatus.REACHABLE_POSSIBLE, True),
+        # Cleared with evidence: present, traversed, no path.
+        (ReachStatus.UNREACHABLE, False),
+        # Nobody could look, which must not read as safe.
+        (ReachStatus.SYMBOLS_UNKNOWN, True),
+        (ReachStatus.GRAPH_INCOMPLETE, True),
+    ],
+)
+def test_the_honest_gate_refuses_what_it_could_not_clear(
+    status: ReachStatus, should_fail: bool
+) -> None:
+    """``reachable || !conclusive`` is the expression this project recommends.
+
+    It was ``reachable || !analysed`` until 2026-11-12, which passed
+    ``symbols_unknown``: reachability *ran* for those findings, so
+    ``analysed`` was true. A build gate written that way reports success on
+    findings nobody could clear -- the precise confusion this tool exists to
+    prevent, sitting in its own recommended policy.
+    """
+    context = {
+        "findings": [
+            {
+                "id": "1",
+                "advisory": "CVE-2026-0001",
+                "severity": "MEDIUM",
+                "severity_rank": 3,
+                "verdict": "affected",
+                "kev": False,
+                "age_days": 1,
+                "epss": 0.0,
+                "cvss": 0.0,
+                "reach": {
+                    "analysed": True,
+                    "conclusive": status.is_conclusive,
+                    "status": status.value,
+                    "reachable": status.is_reachable,
+                    "confidence": "low",
+                    "confidence_rank": 1,
+                    "reason": "",
+                    "path_length": 0,
+                    "via_dynamic_edges": False,
+                },
+            }
+        ],
+        "scan": {},
+        "project": {},
+        "counts": {},
+    }
+    policy = compile_policy(
+        "findings.exists(f, f.reach.reachable || !f.reach.conclusive)", name="honest"
+    )
+    assert policy.evaluate_context(context).passed is not should_fail

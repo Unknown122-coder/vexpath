@@ -531,9 +531,22 @@ same policy give the same answer on a laptop and in CI, which is what makes a
 local run worth trusting. Every field is present and none is null, so an
 expression comparing against a missing value cannot break a build.
 
-**`reach.analysed` is the field that matters most.** Without it a gate cannot
-tell "not reachable" from "nobody looked", and treating the second as the first
-is how a reachability-aware gate becomes less safe than a naive one.
+**`reach.conclusive` is the field that matters most.** Without it a gate
+cannot tell "not reachable" from "nobody could look", and treating the second
+as the first is how a reachability-aware gate becomes less safe than a naive
+one. The honest gate is:
+
+```
+findings.exists(f, f.reach.reachable || !f.reach.conclusive)
+```
+
+**`reach.analysed` is not that field**, despite being written here as though
+it were. It reports whether reachability *ran*, and it runs for
+`symbols_unknown`: it runs, finds the advisory named no functions, and says
+so. A gate written `reachable || !analysed` therefore passes every finding
+nobody could clear, which is the failure this paragraph was warning about,
+committed in the paragraph itself. `analysed` is false only when reachability
+did not run at all -- `--no-reach`, or an ecosystem without support.
 
 The five presets, and what each is for:
 

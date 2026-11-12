@@ -288,6 +288,7 @@ FINDING_FIELDS: tuple[str, ...] = (
 
 REACH_FIELDS: tuple[str, ...] = (
     "analysed",
+    "conclusive",
     "status",
     "reason",
     "confidence",
@@ -338,10 +339,16 @@ def _finding_context(finding: Finding) -> dict[str, Any]:
         "direct": finding.component.direct,
         "suppressed": finding.suppressed_by is not None,
         "reach": {
-            # Whether reachability ran at all. A policy gating on
-            # reach.status without this cannot tell "not reachable" from
-            # "never looked".
+            # Whether reachability ran at all. True even when it ran and
+            # could conclude nothing, which is why it is not the field to
+            # gate on -- see `conclusive`.
             "analysed": reach is not None,
+            # Whether it reached an answer. False for symbols_unknown and
+            # graph_incomplete: the advisory named no functions, or the call
+            # graph could not be completed. This is the field that separates
+            # "not reachable" from "nobody could look", and a gate wanting to
+            # refuse the second reads `!f.reach.conclusive`.
+            "conclusive": reach.status.is_conclusive if reach else False,
             "status": reach.status.value if reach else "",
             "reason": reach.reason.value if reach and reach.reason else "",
             "confidence": reach.confidence.value if reach else "",
