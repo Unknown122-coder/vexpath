@@ -163,6 +163,48 @@ and the backlog is thousands of advisories deep.
 Until it has run, every scan reports `reach.analysed = false` -- "nobody
 looked", which is deliberately not the same answer as "not reachable".
 
+## Shipping a corpus you extracted somewhere else
+
+Symbol extraction takes hours, so it runs where there is time for it -- a
+laptop, a build box, anywhere -- and only the result is shipped. Measured on
+2026-11-11: 55 passes of 200, about three hours, 2,641 advisories extracted,
+37,727 symbols across 729 packages, 13.5% symbol coverage.
+
+```sh
+# Where the time goes. Resumable, so stopping costs the pass and not the run.
+uv run python -m vexpath_worker.main extract-symbols --batch 200 \
+  --cache-root var/patchcache          # repeat until a pass attempts 0
+
+uv run python -m vexpath_worker.main export-snapshot var/snapshot-full
+gzip -k var/snapshot-full/advisories.jsonl   # 62MB becomes 10MB
+```
+
+`read_snapshot` takes `advisories.jsonl.gz` when the plain file is absent, so
+ship the compressed one. **Put it in a directory of its own**: if a plain
+`advisories.jsonl` is present it wins, and an older corpus sitting next to the
+new one would load instead of it, silently and with a valid hash.
+
+```sh
+# One line, because the machine stops five minutes after it starts.
+export MSYS_NO_PATHCONV=1   # Git Bash only; see below
+curl -sS -o /dev/null https://vexpath.fly.dev/healthz   # wake it
+fly ssh console -c infra/fly.toml -C "mkdir -p /data/corpus"
+fly sftp put -c infra/fly.toml var/snapshot-gz/snapshot.json /data/corpus/snapshot.json
+fly sftp put -c infra/fly.toml var/snapshot-gz/advisories.jsonl.gz /data/corpus/advisories.jsonl.gz
+fly ssh console -c infra/fly.toml -C "python -m vexpath_worker.main seed-advisories /data/corpus"
+```
+
+The load is one transaction, so a machine that stops part-way leaves the
+corpus as it was. Run it again.
+
+**On Git Bash, `export MSYS_NO_PATHCONV=1` is not optional.** MSYS rewrites an
+argument that looks like a Unix path into a Windows one, so
+`/data/corpus/snapshot.json` arrives as
+`C:/Program Files/Git/data/corpus/snapshot.json` and the upload fails with
+"file does not exist" naming a path you never typed. It only mangles a path
+that stands alone as its own argument, which is why the `ssh -C "... /data/..."`
+lines work without it and the `sftp put` lines do not.
+
 ## The free allowance, and the five-minute machine
 
 A Fly account with no card on file is a **trial**: machines are stopped after
