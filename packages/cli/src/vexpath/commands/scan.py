@@ -179,7 +179,7 @@ def command(
     # Resolved before any analysis runs. A missing credential or a forgotten
     # --project discovered after a four-minute scan has thrown the scan away,
     # and the person who sees that message is already in a hurry.
-    credential = _upload_credential(upload=upload, project=project)
+    credential = _upload_credential(upload=upload, project=project, policy=policy)
     # Before any analysis too, and for the same reason: a policy that cannot
     # be fetched should not be discovered after a four-minute scan. This may
     # resolve a credential even without --upload, because reading the
@@ -239,18 +239,32 @@ def command(
         raise typer.Exit(code=int(ExitCode.POLICY_FAILED))
 
 
-def _upload_credential(*, upload: bool, project: str | None) -> credentials.Credential | None:
+def _upload_credential(
+    *, upload: bool, project: str | None, policy: str | None = None
+) -> credentials.Credential | None:
     """The credential to upload with, or None when no upload was asked for.
 
     Resolved up front so the two mistakes that waste a whole scan -- no
     credential, and --upload without --project -- are reported before the
     analysis starts rather than after it.
+
+    ``--project`` also means something without ``--upload``: ``--policy
+    project`` names the project whose policy to fetch. Refusing that
+    combination made it impossible to check a build against the
+    organisation's gate without also publishing the results, which are two
+    unrelated decisions.
     """
+    wants_project_policy = (policy or "").strip() == PROJECT_POLICY
+
     if not upload:
-        if project is not None:
+        if project is not None and not wants_project_policy:
             # Saying nothing would silently discard the flag, and the person
             # would wait for a result that never appears on the platform.
-            fail_config("--project only means something with --upload.")
+            fail_config("--project only means something with --upload or --policy project.")
+        if wants_project_policy:
+            # Reading the policy is itself authenticated, so the credential
+            # is resolved here for the same reason: before the analysis.
+            return auth.credential_or_exit()
         return None
     if not project:
         fail_config("--upload needs --project to say where the result goes.")

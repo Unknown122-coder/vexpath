@@ -1027,3 +1027,69 @@ def test_vex_export_refuses_an_unknown_format(
     )
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert "'openvex' or 'cyclonedx'" in result.stderr
+
+
+# --- --policy project ------------------------------------------------------
+
+
+def test_the_project_policy_cannot_be_shadowed_by_a_local_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file called ``project`` must not replace the organisation's gate.
+
+    ``--policy`` accepts a path, so a file of that name in a working
+    directory is the obvious substitution attack on a centrally managed
+    policy: drop ``project`` in the repository, and the gate becomes whatever
+    the repository says. The word is therefore resolved before the preset
+    table and before the filesystem.
+    """
+    from vexpath.commands import auth
+    from vexpath.commands import scan as scan_module
+
+    (tmp_path / "project").write_text("findings.exists(f, false)", encoding="utf-8")
+
+    fetched: list[str] = []
+
+    def fake_fetch(credential: object, project: str) -> str:
+        fetched.append(project)
+        return "findings.exists(f, f.kev)"
+
+    monkeypatch.setattr(auth, "fetch_policy", fake_fetch)
+    monkeypatch.chdir(tmp_path)
+
+    resolved = scan_module._resolve_policy("project", project="svc", credential=_credential())
+
+    assert resolved == "findings.exists(f, f.kev)"
+    assert fetched == ["svc"]
+
+
+def test_the_project_policy_needs_a_project() -> None:
+    import typer
+
+    from vexpath.commands import scan as scan_module
+
+    # fail_config raises typer.Exit, not SystemExit: the CLI exits through
+    # Typer so the exit code stays in one place.
+    with pytest.raises(typer.Exit):
+        scan_module._resolve_policy("project", project=None, credential=_credential())
+
+
+def test_a_preset_still_wins_over_a_file_of_the_same_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vexpath.commands import scan as scan_module
+
+    (tmp_path / "balanced").write_text("findings.exists(f, false)", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert scan_module._resolve_policy("balanced") == "balanced"
+
+
+def _credential() -> object:
+    from vexpath.credentials import Credential
+
+    return Credential(
+        secret="vexpath_live_xxxxxxxxxxxx",
+        api_url="https://example.invalid",
+        source="file",
+    )
