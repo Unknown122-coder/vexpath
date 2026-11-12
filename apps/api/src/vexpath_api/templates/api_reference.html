@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}API reference{% endblock %}
+
+{% block content %}
+<section class="hero narrow">
+  <h1>API reference</h1>
+  <p class="lead">
+    Version {{ version }}. Every <code>/v1</code> endpoint speaks JSON and
+    authenticates with a bearer API key. The HTML pages you are reading use a
+    session cookie, and no endpoint accepts both — a cookie cannot reach
+    <code>/v1</code>, so a form on another site cannot act as you.
+  </p>
+  {% if spec_url %}
+  <p class="cta-row">
+    <a class="button" href="{{ spec_url }}">OpenAPI document</a>
+    <code class="install">curl -H "Authorization: Bearer $VEXPATH_API_KEY" {{ base_url }}/v1/projects</code>
+  </p>
+  {% endif %}
+</section>
+
+<section class="panel narrow">
+  <h2>Authentication</h2>
+  <p>
+    Create a key in <a href="/app/keys">your dashboard</a>. It is shown once:
+    only a hash is stored, so a key cannot be recovered later, from the
+    dashboard or from a database dump.
+  </p>
+  <pre class="preset-expression"><code>Authorization: Bearer vexpath_live_…</code></pre>
+  <p class="hint">
+    A missing, malformed, unknown or revoked key all answer <code>401</code>
+    with the same message. Saying which would tell a caller whether a key
+    they guessed exists.
+  </p>
+</section>
+
+{% for section in sections %}
+<section class="panel narrow">
+  <h2>{{ section.tag }}</h2>
+  {% for operation in section.operations %}
+  <article class="finding">
+    <h3>
+      <code class="badge">{{ operation.method }}</code>
+      <code>{{ operation.path }}</code>
+      {% if operation.authenticated %}
+      <span class="badge badge-muted" title="Requires a bearer API key">key</span>
+      {% endif %}
+    </h3>
+    {% if operation.summary %}<p>{{ operation.summary }}</p>{% endif %}
+    {% if operation.description %}<p class="hint">{{ operation.description }}</p>{% endif %}
+
+    {% if operation.parameters %}
+    <table class="data-table">
+      <caption>Parameters</caption>
+      <thead>
+        <tr><th>Name</th><th>In</th><th>Type</th><th>Required</th></tr>
+      </thead>
+      <tbody>
+        {% for parameter in operation.parameters %}
+        <tr>
+          <td><code>{{ parameter.name }}</code></td>
+          <td>{{ parameter.location }}</td>
+          <td>{{ parameter.schema }}</td>
+          <td>{% if parameter.required %}yes{% else %}no{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <p class="meta">
+      {% if operation.request_body %}
+      Body <code>{{ operation.request_body }}</code>.
+      {% endif %}
+      {% if operation.responses %}
+      Answers
+      {% for response in operation.responses %}<code>{{ response.status }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+      {% endif %}
+    </p>
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}
+
+<section class="panel narrow">
+  <h2>Why this page is not Swagger</h2>
+  <p>
+    Swagger UI loads its JavaScript from a content delivery network, and this
+    site sends <code>script-src 'self'</code>: no third-party script runs here,
+    by design, so the interactive explorer would be a blank page. There is no
+    JavaScript anywhere in this interface
+    (<a href="https://github.com/Unknown122-coder/vexpath">ADR-0011</a>), which
+    is why the reference is rendered on the server from the same schema the
+    application serves.
+  </p>
+</section>
+{% endblock %}

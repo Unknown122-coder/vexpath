@@ -159,7 +159,13 @@ def create_app(
         version=__version__,
         docs_url=resolved.docs_url,
         redoc_url=None,
-        openapi_url="/openapi.json" if resolved.docs_url else None,
+        # Served everywhere, unlike the interactive explorer above. The
+        # document is public API documentation -- it is committed to this
+        # repository -- and withholding it only stops people generating a
+        # client. Swagger UI stays off in production because it needs a
+        # third-party script this site's CSP refuses; the reference page at
+        # /api is rendered on the server from this same schema.
+        openapi_url="/openapi.json",
         lifespan=lifespan,
     )
 

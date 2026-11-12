@@ -67,3 +67,44 @@ def test_autoescaping_is_on(client: TestClient) -> None:
     rendered = templates.env.from_string("{{ value }}").render(value="<script>alert(1)</script>")
     assert "<script>" not in rendered
     assert "&lt;script&gt;" in rendered
+
+
+# --- No link may point at a route that does not exist ---------------------
+
+
+def test_every_internal_link_in_a_template_resolves() -> None:
+    """Two links in the navigation answered 404 for weeks.
+
+    They pointed at ``/docs``, which production deliberately disables, so the
+    home page's "Read the API" button and the "API" item both returned
+    ``{"detail":"Not Found"}``. Nothing failed: the pages rendered, the
+    post-deploy checks passed, and the only report that reaches anyone is a
+    user asking what is wrong with the site.
+
+    Checked against a production application, because that is the one where a
+    route can be absent.
+    """
+    import re
+
+    settings = Settings(
+        env=Environment.PRODUCTION,
+        secret_key="a-real-secret-for-this-test",
+        base_url="https://example.test",
+        database_url="postgresql+psycopg://nobody@127.0.0.1:1/none",
+    )
+    app = create_app(settings)
+
+    broken: list[str] = []
+    for template in sorted(TEMPLATES_DIR.rglob("*.html")):
+        for href in re.findall(r'href="(/[^"#]*)"', template.read_text(encoding="utf-8")):
+            # Anything Jinja fills in at render time is not a literal link and
+            # cannot be resolved from the source.
+            if "{{" in href or "{%" in href:
+                continue
+            scope = {"type": "http", "method": "GET", "path": href, "headers": []}
+            if not any(route.matches(scope)[0].value >= 2 for route in app.router.routes):
+                broken.append(f"{template.name}: {href}")
+
+    assert not broken, "templates link to routes this application does not serve: " + ", ".join(
+        broken
+    )
