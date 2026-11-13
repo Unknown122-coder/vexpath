@@ -8,6 +8,7 @@ from typing import Annotated
 
 import typer
 
+from vexpath import corpus
 from vexpath.output import OutputFormat, emit, emit_json, fail, note
 from vexpath.sources import SNAPSHOT_ENV
 from vexpath_core.advisory.coverage import FixReferenceTier, measure
@@ -17,6 +18,47 @@ from vexpath_core.enums import canonical_ecosystem
 from vexpath_core.snapshot import SnapshotIntegrityError, read_snapshot
 
 app = typer.Typer(help="Download and inspect the advisory corpus.", no_args_is_help=True)
+
+
+@app.command("pull")
+def pull_corpus(
+    directory: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Where to put it. Defaults to the per-user cache, where every command finds it."
+        ),
+    ] = None,
+    url: Annotated[
+        str | None,
+        typer.Option("--url", help="Fetch from somewhere else: a fork, a mirror, your own build."),
+    ] = None,
+) -> None:
+    """Download the published advisory corpus, with its vulnerable symbols.
+
+    The corpus is what makes a finding clearable. OSV says a package is
+    affected; it does not say which functions the fix changed, and without
+    those there is nothing for a reachability search to look for -- so a scan
+    with no corpus reports almost everything as ``symbols_unknown``, which is
+    honest and useless.
+
+    Building one means diffing the fix commit of every advisory, which is
+    hours of cloning upstream repositories and produces the same answer for
+    everybody. So it is built once and published, and this collects it.
+
+    Verified on arrival: the content hash is recomputed over the records and
+    checked against what the snapshot claims. A corpus that fails never
+    replaces one that works.
+    """
+    try:
+        destination, advisories, symbols = corpus.pull(directory, base_url=url)
+    except corpus.CorpusError as exc:
+        fail(str(exc))
+
+    note(
+        f"{advisories} advisories, {symbols} vulnerable symbols -> {destination}\n"
+        f"Every command uses it from now on; override with --snapshot or "
+        f"${SNAPSHOT_ENV}."
+    )
 
 
 @app.command("sync")

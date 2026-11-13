@@ -134,12 +134,36 @@ own benchmark, 819s to 12s.
 
 Full options: [the Action's README](../../apps/action/README.md).
 
+## Get the corpus first
+
+```bash
+vexpath advisory pull
+```
+
+**Do this before anything else.** Without it a scan reads advisories live from
+OSV, and OSV does not publish which functions a fix changed -- so nearly every
+finding comes back `symbols_unknown`: nobody could look. That is an honest
+answer and a useless one, and it is what the tool says until it has a corpus.
+
+The corpus is about ten megabytes and holds the vulnerable symbols extracted
+by diffing each advisory's fix commit: hours of cloning upstream repositories,
+done once and published so nobody repeats it. It lands in a per-user cache and
+every command finds it from then on, with no flag and no environment variable.
+
+It is verified on arrival. The content hash is recomputed over the records and
+checked against what the snapshot claims, and a corpus that fails is discarded
+rather than used -- a substituted one would change verdicts, which is not an
+acceptable degraded mode.
+
 ## Offline, and reproducible
 
 ```bash
-vexpath advisory sync --ecosystem PyPI --dir ./advisories
+vexpath advisory sync --ecosystem PyPI --dir ./advisories   # build your own
 vexpath scan . --snapshot ./advisories
 ```
+
+`advisory pull` already gives you a pinned snapshot; `sync` is for building
+one yourself, from a different ecosystem or at a moment you choose.
 
 A scan against a pinned snapshot can be re-derived months later. One against
 the live API cannot, and every report says which it was. A clearance nobody

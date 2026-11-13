@@ -11,10 +11,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from vexpath.corpus import default_corpus_directory
 from vexpath.output import fail, note, warn
 from vexpath_core.advisory import OsvApiSource, SnapshotSource
 from vexpath_core.protocols import AdvisorySource
-from vexpath_core.snapshot import SnapshotIntegrityError
+from vexpath_core.snapshot import SNAPSHOT_METADATA_FILE, SnapshotIntegrityError
 
 #: Environment variable naming a local advisory snapshot. Set it and commands
 #: become reproducible and offline by default.
@@ -24,17 +25,34 @@ OSV_BASE_ENV = "VEXPATH_OSV_API_BASE"
 
 
 def snapshot_directory(explicit: Path | None = None) -> Path | None:
-    """Resolve the snapshot to read, from the flag or the environment."""
+    """Resolve the snapshot to read: the flag, the environment, or the cache.
+
+    The last of those is what makes this tool useful to somebody who has not
+    built a corpus. ``vexpath advisory pull`` downloads the published one, and
+    every command finds it from then on without being told -- which matters
+    because the alternative is a live OSV query, and OSV does not publish
+    which functions a fix changed. Without a corpus nearly every finding comes
+    back ``symbols_unknown``: an honest answer, and not a useful one.
+
+    Order is deliberate. An explicit flag beats the environment, the
+    environment beats the cache, and a cache that is merely present never
+    overrides something the caller asked for.
+    """
     if explicit is not None:
         return explicit
+
     raw = os.environ.get(SNAPSHOT_ENV, "").strip()
-    if not raw:
-        return None
-    candidate = Path(raw)
-    if not candidate.is_dir():
+    if raw:
+        candidate = Path(raw)
+        if candidate.is_dir():
+            return candidate
         warn(f"${SNAPSHOT_ENV} points at {candidate}, which is not a directory; ignoring it.")
         return None
-    return candidate
+
+    downloaded = default_corpus_directory()
+    if (downloaded / SNAPSHOT_METADATA_FILE).is_file():
+        return downloaded
+    return None
 
 
 def advisory_source(snapshot: Path | None, *, result_noun: str = "scan") -> AdvisorySource:
