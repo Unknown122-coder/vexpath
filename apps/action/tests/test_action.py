@@ -289,3 +289,50 @@ def test_the_report_only_preset_lets_a_build_through(
     assert (
         runner.invoke(app, ["policy", "test", "report-only", "--scan", str(results)]).exit_code == 0
     )
+
+
+# --- What GitHub Marketplace will and will not accept ---------------------
+
+#: Marketplace refuses a longer one. The publish form shows a red cross
+#: against the field and says the limit, which is the first anybody hears of
+#: it -- there is nothing in the action schema, nothing in a linter, and
+#: nothing in the documentation you read while writing the file.
+MAX_MARKETPLACE_DESCRIPTION = 125
+
+
+def test_the_description_fits_in_a_marketplace_listing() -> None:
+    metadata = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+    description = metadata["description"].strip()
+
+    assert len(description) < MAX_MARKETPLACE_DESCRIPTION, (
+        f"the description is {len(description)} characters; Marketplace allows "
+        f"fewer than {MAX_MARKETPLACE_DESCRIPTION} and refuses to publish"
+    )
+    # The word the shortening must not lose. This fails a build when the
+    # vulnerable code can run, and not otherwise; a description that drops
+    # "only" describes every other scanner.
+    assert "only" in description
+
+
+def test_the_listing_metadata_is_complete() -> None:
+    """Everything the publish form requires, checked before it refuses.
+
+    Branding is the one people forget: without an icon and a colour the form
+    rejects the release with no hint as to which field is at fault.
+    """
+    metadata = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+
+    assert metadata["name"]
+    assert metadata["author"]
+    assert metadata["branding"]["icon"]
+    assert metadata["branding"]["color"]
+
+
+def test_the_metadata_is_in_the_repository_root() -> None:
+    """GitHub lists an action only from the root of its repository.
+
+    Not a style preference: at apps/action/action.yml the Publish to
+    Marketplace checkbox never appears, with no explanation of why.
+    """
+    assert ACTION.parent == Path(__file__).resolve().parents[3]
+    assert ACTION.is_file()

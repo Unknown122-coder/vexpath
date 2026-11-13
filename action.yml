@@ -16,9 +16,13 @@
 # need.
 
 name: vexpath
+# Under 125 characters, which GitHub Marketplace requires and the publish
+# form refuses without explaining until you count. The word that has to
+# survive any shortening is "only": this fails a build when the vulnerable
+# code can run, and not otherwise.
 description: >-
-  Reachability-aware dependency scanning. Fails the build only when vulnerable
-  code can actually run, and shows the call path that proves it.
+  Fails the build only when a vulnerable function is reachable from your
+  code, and shows the call path that proves it.
 author: Akmal Khan
 
 branding:
