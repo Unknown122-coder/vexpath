@@ -132,10 +132,7 @@ def pull(
         # substituted one changes verdicts -- drop an advisory's symbols and
         # every project using that package is quietly cleared -- so this is
         # fatal, and the message says to try again rather than how to skip it.
-        msg = (
-            f"the corpus from {root} does not match its own content hash and was "
-            f"discarded: {exc}"
-        )
+        msg = f"the corpus from {root} does not match its own content hash and was discarded: {exc}"
         raise CorpusError(msg) from exc
     except (OSError, ValueError) as exc:
         msg = f"the corpus from {root} could not be read: {exc}"
