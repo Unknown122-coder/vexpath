@@ -435,8 +435,20 @@ def test_a_class_named_alone_still_expands_to_its_methods() -> None:
     assert SIBLING in result.matched_symbols
 
 
-def test_a_module_reached_by_import_remains_a_confirmation() -> None:
-    """When a fix changed module-level code, importing it runs exactly that."""
+def test_a_module_reached_by_import_is_a_possibility_not_a_confirmation() -> None:
+    """Importing runs module-level code. That is reached, not confirmed.
+
+    This asserted the opposite until 2026-11-13, on the reasoning that when a
+    fix changed module-level code, importing it runs exactly that change --
+    which is true. What it does not establish is that the vulnerability can be
+    triggered: the fix changed a constant or a module-level statement, and
+    running an assignment is not the same as running the code that reads it.
+
+    The class-body case one branch above has made the same argument since M2:
+    the class statement ran, which is not the same as its methods running. A
+    module match was the louder version of the same overstatement, and across
+    the PyPI corpus 136 of 3,028 advisory/package pairs rested on it alone.
+    """
     graph = CallGraph(
         nodes={
             "app.main": Node("app.main", SymbolKind.MODULE, file="app/main.py", line=1),
@@ -456,4 +468,61 @@ def test_a_module_reached_by_import_remains_a_confirmation() -> None:
         [_symbol("requests.sessions", kind=SymbolKind.MODULE)],
         _context(graph),
     )
-    assert result.status is ReachStatus.REACHABLE_CONFIRMED
+    assert result.status is ReachStatus.REACHABLE_POSSIBLE
+    # And it says why in its own words, rather than borrowing the generic
+    # possible-verdict wording about "something this analysis could not see":
+    # here the analysis saw everything, and the module-level code does run.
+    assert "runs when the package is imported" in result.explanation
+    assert "depends on what reads the changed value" in result.explanation
+
+
+def test_a_possible_verdict_does_not_invent_a_dynamic_edge() -> None:
+    """The flag says what the path contains, not what the verdict is.
+
+    ``via_dynamic_edges`` was forced true for every possible verdict, so a
+    class or module reached by a plain import claimed its path went through
+    dynamic dispatch. Anyone reading the evidence, or writing a policy on
+    ``f.reach.via_dynamic_edges``, would have believed it.
+
+    A possible verdict now justifies itself with ``reason`` instead, and the
+    model requires one or the other -- so it still cannot be possible for no
+    stated cause.
+    """
+    graph = CallGraph(
+        nodes={
+            "app.main": Node("app.main", SymbolKind.MODULE, file="app/main.py", line=1),
+            "requests.sessions": Node(
+                "requests.sessions",
+                SymbolKind.MODULE,
+                file="requests/sessions.py",
+                line=1,
+                package=PACKAGE,
+            ),
+        },
+        edges={"app.main": (Edge("app.main", "requests.sessions", EdgeKind.IMPORT, 1),)},
+        quality=GraphQuality(call_sites=10, files_parsed=2),
+    )
+
+    result = decide(
+        _finding(),
+        [_symbol("requests.sessions", kind=SymbolKind.MODULE)],
+        _context(graph),
+    )
+
+    assert result.status is ReachStatus.REACHABLE_POSSIBLE
+    # An import edge is neither dynamic nor opaque, and the result says so.
+    assert result.via_dynamic_edges is False
+    assert result.reason is ReachReason.MODULE_LEVEL_ONLY
+
+
+def test_a_possible_verdict_still_cannot_be_unexplained() -> None:
+    """Widening the invariant must not weaken it to nothing."""
+    from vexpath_core.models.finding import ReachabilityResult
+
+    with pytest.raises(ValueError, match="needs either a dynamic or opaque edge"):
+        ReachabilityResult(
+            status=ReachStatus.REACHABLE_POSSIBLE,
+            confidence=Confidence.LOW,
+            matched_symbols=("lib.danger",),
+            via_dynamic_edges=False,
+        )

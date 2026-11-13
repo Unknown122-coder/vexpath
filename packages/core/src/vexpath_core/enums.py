@@ -271,6 +271,14 @@ class ReachStatus(StrEnum):
 class ReachReason(StrEnum):
     """Why a non-definitive reachability status was reached."""
 
+    #: Every path reaches a class definition by import. The class statement
+    #: runs; its methods do not.
+    CLASS_BODY_ONLY = "class_body_only"
+    #: Every match is a module rather than something callable. Importing runs
+    #: the module-level code, which is not the same as triggering the
+    #: behaviour the advisory describes.
+    MODULE_LEVEL_ONLY = "module_level_only"
+
     #: Reachability analysis is not implemented for the component's ecosystem.
     ECOSYSTEM_UNSUPPORTED = "ecosystem_unsupported"
     #: The advisory has no fix commit to diff.

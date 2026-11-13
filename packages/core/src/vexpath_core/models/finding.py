@@ -125,8 +125,22 @@ class ReachabilityResult(Base):
         ):
             msg = f"status {self.status.value} requires a reason"
             raise ValueError(msg)
-        if self.status is ReachStatus.REACHABLE_POSSIBLE and not self.via_dynamic_edges:
-            msg = "reachable_possible means the path relied on a dynamic or opaque edge"
+        if (
+            self.status is ReachStatus.REACHABLE_POSSIBLE
+            and not self.via_dynamic_edges
+            and self.reason is None
+        ):
+            # A possible verdict has to say what makes it only possible. That
+            # used to mean a dynamic or opaque edge and nothing else, so the
+            # two match-granularity cases -- a class reached by import, a
+            # module rather than a function -- satisfied it by setting
+            # via_dynamic_edges on a path that had no such edge. The flag then
+            # said something untrue about the path, which anyone reading the
+            # evidence or gating a policy on it would have believed.
+            msg = (
+                "reachable_possible needs either a dynamic or opaque edge in the "
+                "path, or a reason saying what else makes it only possible"
+            )
             raise ValueError(msg)
         return self
 

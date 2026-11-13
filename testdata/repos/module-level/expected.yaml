@@ -4,6 +4,13 @@ description: >
   module scope, so importing it is enough to execute the change. Reaching the
   import must therefore count as reaching the symbol, even though no call edge
   points at it.
+
+  It counts as reachable_possible rather than reachable_confirmed, and the
+  distinction is the point of the case. The module-level code definitely runs
+  -- that is not in doubt and the analysis saw it. What is unknown is whether
+  the behaviour CVE-2020-14343 describes can be triggered, because no
+  vulnerable function was matched: only the module containing it. Confirmed is
+  reserved for a resolved path to something callable.
 lockfile: requirements.txt
 entry_points:
   - app.config:load
@@ -11,7 +18,8 @@ expected:
   - advisory: CVE-2020-14343
     component: pkg:pypi/pyyaml@5.3.1
     verdict: affected
-    reach_status: reachable_confirmed
-    confidence: high
+    reach_status: reachable_possible
+    reach_reason: module_level_only
+    confidence: low
     must_include_symbols:
       - yaml.constructor

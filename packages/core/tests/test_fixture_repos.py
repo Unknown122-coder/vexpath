@@ -105,7 +105,15 @@ def test_expected_verdicts_are_internally_consistent(fixture_repos_dir: Path) ->
                 assert expectation["must_include_symbols"], name
 
             if status is ReachStatus.REACHABLE_POSSIBLE:
-                assert expectation.get("via_dynamic_edges") is True, name
+                # A possible verdict has to say what makes it only possible.
+                # A dynamic or opaque edge is one answer; a match that is
+                # only a class body or only a module is another, and those
+                # paths contain no such edge. Requiring the flag made the
+                # fixture declare something untrue about the path.
+                assert (
+                    expectation.get("via_dynamic_edges") is True
+                    or expectation.get("reach_reason") is not None
+                ), name
                 assert expectation["confidence"] == "low", name
 
 

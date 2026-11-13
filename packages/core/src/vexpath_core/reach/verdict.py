@@ -135,6 +135,22 @@ def decide(
             context,
             symbols,
             reason=_CLASS_BODY_ONLY,
+            cause=ReachReason.CLASS_BODY_ONLY,
+        )
+    if certain and _only_module_level(certain, context):
+        # Module-level code runs when the package is imported, so this is
+        # reached. What it is not is confirmed: the fix changed a constant or
+        # a module-level statement rather than a function, and running an
+        # assignment is not the same as running the code that reads it. The
+        # same argument the class-body case makes one line above.
+        return _reached(
+            ReachStatus.REACHABLE_POSSIBLE,
+            certain,
+            targets,
+            context,
+            symbols,
+            explanation=_module_level_explanation(certain[0], context),
+            cause=ReachReason.MODULE_LEVEL_ONLY,
         )
     if certain:
         return _reached(ReachStatus.REACHABLE_CONFIRMED, certain, targets, context, symbols)
@@ -187,6 +203,45 @@ _CLASS_BODY_ONLY = (
     "every path to it reaches a class definition by import, which runs the "
     "class body but not its methods"
 )
+
+
+def _only_module_level(matched: Sequence[str], context: ReachabilityContext) -> bool:
+    """True when every match is a module rather than something callable.
+
+    A module is recorded as the vulnerable symbol when the fix changed code
+    outside any definition: a constant, a module-level statement. Importing
+    the package runs that, which is why it counts as reached at all -- but
+    "the assignment ran" is weaker than "the vulnerable function was called",
+    and reporting both as ``reachable_confirmed`` gave them equal weight.
+
+    Measured when this was introduced: 136 of 3,028 advisory/package pairs in
+    the PyPI corpus rested on module-level evidence alone, all of them
+    reported as confirmed.
+    """
+    for symbol in matched:
+        node = context.graph.nodes.get(symbol)
+        if node is None or node.kind is not SymbolKind.MODULE:
+            return False
+    return True
+
+
+def _module_level_explanation(symbol: str, context: ReachabilityContext) -> str:
+    """Say what import-time execution does and does not establish.
+
+    Deliberately not the generic possible-verdict wording, which says the
+    outcome "depends on something this analysis could not see". Here the
+    analysis saw everything: the module-level code definitely runs. What is
+    unknown is whether the behaviour the advisory describes can be triggered,
+    which depends on code that uses the changed value.
+    """
+    del context
+    return (
+        f"The fix changed module-level code in {symbol}, which runs when the "
+        f"package is imported -- so it does run. No vulnerable function was "
+        f"matched, though, so whether the problem can actually be triggered "
+        f"depends on what reads the changed value. Treat it as reachable "
+        f"until proven otherwise."
+    )
 
 
 def _only_class_bodies(matched: Sequence[str], context: ReachabilityContext) -> bool:
@@ -251,16 +306,19 @@ def _reached(
     symbols: Sequence[VulnerableSymbol],
     *,
     reason: str | None = None,
+    explanation: str | None = None,
+    cause: ReachReason | None = None,
 ) -> ReachabilityResult:
     path = context.result.path_to(matched[0], context.graph)
-    via_dynamic = (
-        any(step.edge_kind in {EdgeKind.DYNAMIC, EdgeKind.OPAQUE} for step in path)
-        or status is ReachStatus.REACHABLE_POSSIBLE
-    )
+    # Only what the path actually contains. It used to be forced true for
+    # every possible verdict, which made a class reached by a plain import
+    # claim it went through dynamic dispatch.
+    via_dynamic = any(step.edge_kind in {EdgeKind.DYNAMIC, EdgeKind.OPAQUE} for step in path)
 
     return ReachabilityResult(
         status=status,
         confidence=_reachable_confidence(status, context, symbols),
+        reason=cause,
         matched_symbols=matched,
         searched_symbols=tuple(dict.fromkeys(symbol.symbol for symbol in symbols)),
         shortest_path=tuple(
@@ -276,7 +334,11 @@ def _reached(
         via_dynamic_edges=via_dynamic,
         entry_points=context.entry_points,
         graph_stats=_stats(context),
-        explanation=_reached_explanation(status, matched, path, context, reason=reason),
+        explanation=(
+            explanation
+            if explanation is not None
+            else _reached_explanation(status, matched, path, context, reason=reason)
+        ),
     )
 
 
