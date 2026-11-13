@@ -181,8 +181,14 @@ def _symbols_at(
     visit(tree, module, None)
 
     # Lines inside a definition are attributed to it. Anything left over is
-    # module-level code, and importing the module runs it.
-    covered = _covered_lines(tree)
+    # module-level code, and importing the module runs it -- but only if it is
+    # code. An import statement and a docstring also "run" on import and
+    # neither can carry a vulnerability, so a fix that adds an import or
+    # reflows a docstring must not mark the whole module as the vulnerable
+    # symbol. It did: because a module match is treated as confirmed
+    # reachability, every project importing the package was told its
+    # vulnerable code can run, on the evidence of a changed docstring.
+    covered = _covered_lines(tree) | _inert_lines(tree)
     if any(line not in covered for line in targets):
         results.setdefault(module, (SymbolKind.MODULE, True))
 
@@ -219,6 +225,32 @@ def _covered_lines(tree: ast.Module) -> set[int]:
             start = min([node.lineno, *(decorator.lineno for decorator in node.decorator_list)])
             covered.update(range(start, (node.end_lineno or node.lineno) + 1))
     return covered
+
+
+def _inert_lines(tree: ast.Module) -> set[int]:
+    """Module-level lines that run on import but cannot be a vulnerability.
+
+    Imports and the module docstring. Both execute when the module is
+    imported, which is why they were counted as module-level code, and
+    neither can be the thing an advisory is about: an import binds a name and
+    a docstring is a string.
+
+    Module-level *constants* are deliberately not in here. A changed regular
+    expression is a plausible fix for a denial of service, so an assignment
+    stays evidence even though it only binds a value.
+    """
+    inert: set[int] = set()
+    for index, node in enumerate(tree.body):
+        is_import = isinstance(node, ast.Import | ast.ImportFrom)
+        is_docstring = (
+            index == 0
+            and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        )
+        if is_import or is_docstring:
+            inert.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return inert
 
 
 def _combine(reference: Confidence, path: Confidence, *, body_touched: bool) -> Confidence:

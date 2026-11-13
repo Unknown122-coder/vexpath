@@ -1056,3 +1056,75 @@ def test_a_release_naming_too_many_functions_is_refused() -> None:
     assert result.status is SymbolsStatus.NONE
     assert f"above the {MAX_SYMBOLS_PER_TAG_DIFF}" in result.detail
     assert not result.symbols
+
+
+# --- A module is only the symbol when module-level *code* changed ---------
+
+
+def _module_symbols(source: str, lines: list[int]) -> list[str]:
+    import ast
+
+    from vexpath_core.patchdiff.extract import _symbols_at
+
+    return [symbol for symbol, _, _ in _symbols_at(ast.parse(source), "pkg.mod", lines)]
+
+
+MODULE_SOURCE = '''"""A module docstring."""
+import os
+
+PATTERN = r"[a-z]+"
+
+CONFIGURED = bool(os.environ.get("X"))
+
+def handler(value):
+    return PATTERN + value
+'''
+
+
+def test_a_changed_import_does_not_make_the_module_vulnerable() -> None:
+    """Otherwise a fix that adds an import condemns every importer.
+
+    A module symbol is treated as confirmed reachability -- importing the
+    module does run module-level code -- so anything recorded as a module
+    symbol tells every project that imports the package that its vulnerable
+    code can run. An import statement runs on import and cannot carry a
+    vulnerability; it binds a name. Fixes add imports constantly.
+    """
+    assert _module_symbols(MODULE_SOURCE, [2]) == []
+
+
+def test_a_changed_docstring_does_not_make_the_module_vulnerable() -> None:
+    """The indefensible case, and it was real.
+
+    A reflowed docstring marked the module as the vulnerable symbol, which
+    marked every importer of the package as confirmed reachable, on the
+    evidence of a string literal.
+    """
+    assert _module_symbols(MODULE_SOURCE, [1]) == []
+
+
+def test_a_changed_module_constant_is_still_evidence() -> None:
+    """Not every module-level line is inert, and this is the reason.
+
+    A changed regular expression is a plausible fix for a denial of service,
+    so an assignment stays evidence even though it only binds a value.
+    Dropping constants along with imports would have thrown that away.
+    """
+    assert _module_symbols(MODULE_SOURCE, [4]) == ["pkg.mod"]
+
+
+def test_module_level_code_is_still_evidence() -> None:
+    assert _module_symbols(MODULE_SOURCE, [6]) == ["pkg.mod"]
+
+
+def test_an_import_changed_beside_real_code_keeps_the_module() -> None:
+    """The exclusion is per line, not per commit.
+
+    A fix that adds an import *and* changes a constant is still a fix to the
+    constant.
+    """
+    assert _module_symbols(MODULE_SOURCE, [2, 4]) == ["pkg.mod"]
+
+
+def test_a_changed_function_is_attributed_to_the_function() -> None:
+    assert _module_symbols(MODULE_SOURCE, [9]) == ["pkg.mod.handler"]
