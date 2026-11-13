@@ -43,7 +43,9 @@ MANIFESTS = (
 #: The packages that are depended on by name and pinned by version.
 SIBLINGS = ("vexpath-core", "vexpath-platform", "vexpath-db")
 
-ACTION = ROOT / "apps" / "action" / "action.yml"
+#: At the repository root, because GitHub lists an action only from
+#: there. The README, tests and notes stay in apps/action/.
+ACTION = ROOT / "action.yml"
 
 #: PEP 440, loosely: enough to refuse a typo without reimplementing the spec.
 #: A bad version reaches PyPI as a different release than the one intended,

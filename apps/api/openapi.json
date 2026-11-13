@@ -1221,7 +1221,7 @@
   "info": {
     "summary": "Reachability-aware vulnerability analysis with signed VEX output.",
     "title": "Software Supply-Chain Security Platform",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "openapi": "3.1.0",
   "paths": {
