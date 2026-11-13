@@ -1,6 +1,6 @@
 [project]
 name = "vexpath-api"
-version = "0.1.2"
+version = "0.1.3"
 description = "FastAPI service: the /v1 JSON API and the server-rendered web UI."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,9 +13,9 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Akmal Khan" }]
 dependencies = [
-    "vexpath-core==0.1.2",
-    "vexpath-platform==0.1.2",
-    "vexpath-db==0.1.2",
+    "vexpath-core==0.1.3",
+    "vexpath-platform==0.1.3",
+    "vexpath-db==0.1.3",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "jinja2>=3.1",
