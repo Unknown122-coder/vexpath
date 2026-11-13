@@ -1,10 +1,23 @@
-# Software Supply-Chain Security Platform
+# vexpath
+
+[![reachable](https://vexpath.fly.dev/badge/unknown122-coder/vexpath.svg)](https://vexpath.fly.dev/p/unknown122-coder/vexpath)
+[![PyPI](https://img.shields.io/pypi/v/vexpath)](https://pypi.org/project/vexpath/)
+[![CI](https://github.com/Unknown122-coder/vexpath/actions/workflows/ci.yml/badge.svg)](https://github.com/Unknown122-coder/vexpath/actions/workflows/ci.yml)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+The first badge is this project scanning itself, and it links to the report
+behind it. It says *none reachable* rather than *passing*, because a count of
+findings nobody can reach is the only number worth putting on a README.
 
 An open platform that turns a Software Bill of Materials (SBOM) into an honest answer to one question: **of all the known vulnerabilities in my dependencies, which ones can actually hurt me?**
 
 It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches every component against public advisory databases, then performs **reachability analysis**: it builds a call graph of the user's code and its dependencies, extracts the exact functions that each advisory's fix commit touched, and checks whether those functions are reachable from the application's entry points. The result is published as a signed **OpenVEX** document and an **in-toto attestation**, enforced in CI by a **policy engine**, and surfaced on a hosted web platform with public report pages, per-package vulnerability pages and a README badge.
 
-> Status: **M0–M4 complete, M5 in progress** (2026-11-10). The scanner reads
+> Status: **released and deployed** (2026-11-13).
+> [`vexpath` 0.1.1 on PyPI](https://pypi.org/project/vexpath/), the platform
+> live at [vexpath.fly.dev](https://vexpath.fly.dev) with an advisory corpus of
+> 19,579 advisories and 27,877 vulnerable symbols across 805 packages. The
+> scanner reads
 > seven lockfile formats and both SBOM standards, matches against a
 > reproducible advisory corpus, and reports in table, JSON, Markdown and
 > SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
