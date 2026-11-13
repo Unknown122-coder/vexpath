@@ -20,6 +20,7 @@ without it.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -253,14 +254,10 @@ def prepare_reachability(
             f"downloaded from the package index rather than from an installed "
             f"environment"
         )
-    if dependencies.unavailable:
-        # Named explicitly, because a finding against one of these can be
-        # confirmed but never cleared, and a reader should know which.
-        shown = sorted(dependencies.unavailable)[:5]
-        notes.append(
-            f"{len(dependencies.unavailable)} package(s) had no source to analyse "
-            f"({', '.join(shown)}), so their findings cannot be cleared"
-        )
+    # Grouped by cause, and each cause named. One line listing five
+    # packages and no reason sent a reader looking for a missing install
+    # when the environment simply held a different version.
+    notes.extend(_unavailable_notes(dependencies.unavailable))
 
     return ReachabilitySetup(
         context=context,
@@ -275,6 +272,59 @@ def prepare_reachability(
         ),
         notes=tuple(notes),
     )
+
+
+#: How many packages to name before summarising the rest.
+NAMED_IN_A_NOTE = 5
+
+
+def _unavailable_notes(unavailable: Mapping[str, str]) -> list[str]:
+    """Say *why* each package could not be analysed, not merely that it was not.
+
+    This used to be one line naming five packages and no reason, which hid the
+    most common cause behind the least useful wording. Scanning a real project
+    reported "16 package(s) had no source to analyse (argon2-cffi, fastapi,
+    ...)" while every one of them was installed and perfectly readable: the
+    environment simply held newer versions than the lockfile, so graphing them
+    would have described code the project does not ship.
+
+    "Not installed" and "installed, but a different version" need opposite
+    responses -- install the dependencies, or reconcile the lockfile with the
+    environment -- and a reader who cannot tell them apart will try the wrong
+    one.
+    """
+    if not unavailable:
+        return []
+
+    grouped: dict[str, list[str]] = {}
+    for package, reason in sorted(unavailable.items()):
+        grouped.setdefault(_cause(reason), []).append(package)
+
+    notes: list[str] = []
+    for cause, packages in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])):
+        shown = ", ".join(packages[:NAMED_IN_A_NOTE])
+        if len(packages) > NAMED_IN_A_NOTE:
+            shown += f" and {len(packages) - NAMED_IN_A_NOTE} more"
+        notes.append(
+            f"{len(packages)} package(s) could not be analysed, so their findings "
+            f"cannot be cleared -- {cause}: {shown}"
+        )
+    return notes
+
+
+def _cause(reason: str) -> str:
+    """Collapse a per-package reason into the cause it shares with others.
+
+    The version-mismatch reason names both versions, so it is unique per
+    package and would defeat grouping entirely -- which is the case this
+    function exists for.
+    """
+    if "does not ship" in reason:
+        return (
+            "the environment has a different version from the one in the lockfile, "
+            "so graphing it would describe code this project does not ship"
+        )
+    return reason
 
 
 def symbols_to_search(finding: Finding, advisory: Advisory | None) -> tuple[VulnerableSymbol, ...]:

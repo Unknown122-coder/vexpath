@@ -109,7 +109,8 @@ def test_nothing_is_cleared_when_a_dependency_cannot_be_analysed(
         assert finding.verdict is Verdict.UNDER_INVESTIGATION
         assert finding.reach is not None
         assert not finding.reach.status.may_suppress
-    assert any("no source to analyse" in note for note in results.analysis_notes)
+    assert any("could not be analysed" in note for note in results.analysis_notes)
+    assert any("not installed" in note for note in results.analysis_notes)
 
 
 def test_a_module_level_advisory_is_matched(
@@ -215,3 +216,62 @@ def test_every_affected_fixture_produces_its_finding(
     wanted = {entry["advisory"] for entry in expected["expected"] if entry["verdict"] == "affected"}
     results = matching_only(fixture_repos_dir / fixture, source)
     assert wanted <= {finding.advisory.id for finding in results.findings}
+
+
+# --- Saying which problem it is -------------------------------------------
+
+
+def test_the_reason_a_package_was_not_analysed_is_grouped_and_named() -> None:
+    """Two causes that need opposite responses must not read the same.
+
+    Scanning a real project reported "16 package(s) had no source to analyse
+    (argon2-cffi, fastapi, ...)" while every one of them was installed and
+    readable: the environment held newer versions than the lockfile. The
+    reader's next move for that is to reconcile the two, and for a genuinely
+    missing package it is to install it -- so a message that cannot tell them
+    apart sends half its readers the wrong way.
+    """
+    from vexpath_core.scan import _unavailable_notes
+
+    notes = _unavailable_notes(
+        {
+            "fastapi": (
+                "the environment has 0.162.0 but the inventory says 0.115.6, so its "
+                "graph would describe code this project does not ship"
+            ),
+            "pillow": (
+                "the environment has 13.0.0 but the inventory says 10.4.0, so its "
+                "graph would describe code this project does not ship"
+            ),
+            "requests": "not installed in the environment being scanned",
+        }
+    )
+
+    assert len(notes) == 2, notes
+    # The mismatches group together even though each reason names different
+    # versions, which is the case the grouping exists for.
+    mismatch = next(note for note in notes if "different version" in note)
+    assert "2 package(s)" in mismatch
+    assert "fastapi" in mismatch
+    assert "pillow" in mismatch
+
+    missing = next(note for note in notes if "not installed" in note)
+    assert "requests" in missing
+    assert "fastapi" not in missing
+
+
+def test_a_long_list_of_packages_is_summarised_rather_than_printed() -> None:
+    from vexpath_core.scan import NAMED_IN_A_NOTE, _unavailable_notes
+
+    unavailable = {
+        f"package{index}": "not installed in the environment being scanned"
+        for index in range(NAMED_IN_A_NOTE + 3)
+    }
+
+    note = _unavailable_notes(unavailable)[0]
+
+    assert "and 3 more" in note
+    # The first few by name, the rest counted. Asserted on the names rather
+    # than on comma arithmetic, which also counts the prose.
+    assert f"package{NAMED_IN_A_NOTE - 1}" in note
+    assert f"package{NAMED_IN_A_NOTE}" not in note

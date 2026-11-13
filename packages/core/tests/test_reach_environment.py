@@ -344,7 +344,10 @@ def test_a_scan_without_the_dependency_installed_clears_nothing(
     assert results.findings
     assert all(finding.verdict is Verdict.UNDER_INVESTIGATION for finding in results.findings)
     assert results.analysis_notes
-    assert "no source to analyse" in results.analysis_notes[0]
+    # The note says why, not merely that: "not installed" and "installed
+    # at a different version" call for opposite responses.
+    assert "could not be analysed" in results.analysis_notes[0]
+    assert "not installed" in results.analysis_notes[0]
 
 
 def test_a_scan_reports_the_graph_it_used(

@@ -8,6 +8,7 @@ core tests, the database tests and the benchmark alike.
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,15 @@ from vexpath_platform.eventloop import configure_event_loop
 os.environ.pop("FORCE_COLOR", None)
 os.environ.setdefault("NO_COLOR", "1")
 os.environ.setdefault("TERM", "dumb")
+
+# And point the cache somewhere disposable, before anything reads it. The
+# command line falls back to a downloaded advisory corpus when no snapshot is
+# named, so a developer who has run `vexpath advisory pull` has a corpus in
+# their real user cache -- and a test asserting that a scan without a snapshot
+# warns about reproducibility then fails on their machine and passes in CI.
+# A suite whose result depends on what the developer happens to have
+# downloaded is not testing the code.
+os.environ.setdefault("VEXPATH_CACHE_DIR", tempfile.mkdtemp(prefix="vexpath-test-cache-"))
 
 # Windows defaults to an event loop psycopg's asynchronous mode cannot use, so
 # every asynchronous database test would fail with an interface error naming

@@ -278,7 +278,7 @@ def test_a_dependency_with_no_source_is_not_cleared(
     assert result.reach is not None
     assert result.reach.reason is ReachReason.PACKAGE_NOT_ANALYSED
     assert not result.reach.status.may_suppress
-    assert any("no source to analyse" in note for note in result.notes)
+    assert any("could not be analysed" in note for note in result.notes)
 
 
 def test_the_graph_the_answer_rests_on_is_reported(
