@@ -119,7 +119,7 @@ def extract_for_advisory(
             detail=f"Could not fetch {reference.commit} from {reference.repository}: {exc}",
         )
 
-    if reference.is_release_range and len(commit_diff.files) > MAX_FILES_PER_TAG_DIFF:
+    if reference.is_release_diff and len(commit_diff.files) > MAX_FILES_PER_TAG_DIFF:
         # Refused rather than truncated. Taking the first forty files of a
         # large release would name an arbitrary subset of its changes as the
         # vulnerable symbols, which is worse than naming none: it reads as
@@ -169,14 +169,14 @@ def extract_for_advisory(
             reference_confidence=reference.confidence,
             commit=reference.commit,
             source=(
-                SymbolSource.TAG_DIFF if reference.is_release_range else SymbolSource.FIX_COMMIT
+                SymbolSource.TAG_DIFF if reference.is_release_diff else SymbolSource.FIX_COMMIT
             ),
         )
         collected.extend(symbols)
         failures.extend(report.failures)
         refactor = refactor or report.looks_like_refactor
 
-    if reference.is_release_range and len(collected) > MAX_SYMBOLS_PER_TAG_DIFF:
+    if reference.is_release_diff and len(collected) > MAX_SYMBOLS_PER_TAG_DIFF:
         return PatchDiffResult(
             advisory_id=advisory.id,
             status=SymbolsStatus.NONE,
@@ -203,12 +203,18 @@ def extract_for_advisory(
             notes=(*commit_diff.notes, *failures),
         )
 
-    if reference.is_release_range:
+    if reference.is_release_diff:
         detail = (
             f"Extracted {len(collected)} symbol(s) by diffing the release that fixed "
             f"this against the one before it, because the advisory names no fix "
             f"commit. These are the functions the *release* changed, so some of them "
             f"are unrelated to the fix."
+        )
+    elif reference.spans_commits:
+        detail = (
+            f"Extracted {len(collected)} symbol(s) from the merge request's range, "
+            f"{reference.base[:12] if reference.base else '?'}.."
+            f"{reference.commit[:12] if reference.commit else '?'}."
         )
     else:
         detail = (
@@ -244,6 +250,9 @@ def _resolve_release_range(
     unresolved. The reason is the message a human reads next to the advisory,
     so it says which of the several ways this fails happened.
     """
+    if reference.tier is FixReferenceTier.PULL_REQUEST and reference.pull_request is not None:
+        return _resolve_pull_request(reference, source)
+
     if reference.tier is not FixReferenceTier.TAG_DERIVABLE or not reference.fixed_version:
         return None, (
             f"The fix is identified by a {reference.tier.value.replace('_', ' ')} "
@@ -269,6 +278,37 @@ def _resolve_release_range(
             f"No release tag matching {reference.fixed_version} was found in "
             f"{reference.repository}, so there is no release to diff. The project may "
             f"tag releases differently, or not at all."
+        )
+
+    base, commit = resolved
+    return replace(reference, commit=commit, base=base), ""
+
+
+def _resolve_pull_request(
+    reference: FixReference, source: CommitSource
+) -> tuple[FixReference | None, str]:
+    """Turn a merge request into the commits that bracket it.
+
+    Needs no forge API and no token: the hosts advertise the refs over plain
+    git. See ``GitCommitSource.resolve_pull_request`` for which ref is
+    preferred and why a branch tip that is itself a merge is refused.
+    """
+    assert reference.pull_request is not None  # narrowed by the caller
+
+    try:
+        resolved = source.resolve_pull_request(reference.repository, reference.pull_request)
+    except FetchError as exc:
+        return None, (
+            f"Pull request {reference.pull_request} of {reference.repository} could "
+            f"not be read: {exc}"
+        )
+
+    if resolved is None:
+        return None, (
+            f"Pull request {reference.pull_request} of {reference.repository} could "
+            f"not be resolved to a pair of commits. Either the forge no longer "
+            f"advertises its refs, or its branch tip is a merge of the base branch, "
+            f"which cannot be diffed without attributing the whole merge to this fix."
         )
 
     base, commit = resolved

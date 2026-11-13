@@ -661,7 +661,7 @@ def test_an_advisory_with_no_reference_is_recorded_as_such() -> None:
     assert "no usable fix reference" in result.detail
 
 
-def test_a_pull_request_reference_stays_pending() -> None:
+def test_a_pull_request_the_forge_no_longer_advertises_stays_pending() -> None:
     advisory = _advisory(
         references=(Reference(type="FIX", url="https://github.com/psf/requests/pull/1"),)
     )
@@ -669,6 +669,9 @@ def test_a_pull_request_reference_stays_pending() -> None:
     assert result.status is SymbolsStatus.PENDING
     assert result.reference is not None
     assert result.reference.pull_request == 1
+    # And it says which of the two ways this fails happened, because they
+    # need different things done about them.
+    assert "no longer advertises its refs" in result.detail
 
 
 def test_a_fetch_failure_is_recorded_as_a_failure() -> None:
@@ -1128,3 +1131,110 @@ def test_an_import_changed_beside_real_code_keeps_the_module() -> None:
 
 def test_a_changed_function_is_attributed_to_the_function() -> None:
     assert _module_symbols(MODULE_SOURCE, [9]) == ["pkg.mod.handler"]
+
+
+# --- Resolving a merge request --------------------------------------------
+#
+# 1,343 PyPI advisories point at a pull request and nothing else. No forge
+# API is involved: the hosts advertise refs/pull/N/head over plain git, so
+# this needs no token and has no hourly limit.
+
+
+def _pull_source(files: tuple[object, ...]) -> RecordedCommitSource:
+    return RecordedCommitSource(
+        diffs={
+            "c" * 40: CommitDiff(
+                commit="c" * 40,
+                repository="https://github.com/psf/requests",
+                files=files,  # type: ignore[arg-type]
+            )
+        },
+        pull_requests={7: ("b" * 40, "c" * 40)},
+    )
+
+
+def test_a_pull_request_is_resolved_and_extracted() -> None:
+    advisory = _advisory(
+        references=(Reference(type="FIX", url="https://github.com/psf/requests/pull/7"),)
+    )
+    source = _pull_source(
+        ((_file_diff("requests/sessions.py", [6, 7], []), POST_SOURCE, PRE_SOURCE),)
+    )
+
+    result = extract_for_advisory(advisory, source)
+
+    assert result.status is SymbolsStatus.EXTRACTED
+    assert "requests.sessions.Session.send" in {symbol.symbol for symbol in result.symbols}
+
+
+def test_a_resolved_pull_request_is_a_range_not_a_single_commit() -> None:
+    """Both ends, so the diff is the branch rather than its last commit.
+
+    A pull request is bracketed by two commits. Recording only the head and
+    diffing it against its own parent would read just the final commit of the
+    branch, which is what the ``/head`` fallback has to settle for -- but when
+    the pair is known, the whole range is read.
+    """
+    advisory = _advisory(
+        references=(Reference(type="FIX", url="https://github.com/psf/requests/pull/7"),)
+    )
+    source = _pull_source(
+        ((_file_diff("requests/sessions.py", [6, 7], []), POST_SOURCE, PRE_SOURCE),)
+    )
+
+    result = extract_for_advisory(advisory, source)
+
+    assert result.reference is not None
+    assert result.reference.spans_commits
+    assert result.reference.base == "b" * 40
+    assert result.reference.commit == "c" * 40
+
+
+def test_the_pull_ref_prefix_follows_the_forge() -> None:
+    """GitLab calls the same thing a merge request and files it elsewhere."""
+    from vexpath_core.patchdiff.fetch import _pull_ref_prefix
+
+    assert _pull_ref_prefix("https://github.com/psf/requests") == "refs/pull"
+    assert _pull_ref_prefix("https://codeberg.org/a/b") == "refs/pull"
+    assert _pull_ref_prefix("https://gitlab.com/a/b") == "refs/merge-requests"
+
+
+def test_a_pull_request_is_not_labelled_or_capped_like_a_release() -> None:
+    """A pull request is the fix. A release merely contains it.
+
+    Both span two commits, and for a while that was the only distinction the
+    code made -- so a resolved merge request would have had its symbols
+    recorded as ``tag_diff`` and refused above twenty-five of them, the limit
+    that exists because a release diff is an inventory of everything shipped.
+    A branch that fixes one bug across thirty functions is still a fix.
+    """
+    from vexpath_core.patchdiff.fetch import MAX_SYMBOLS_PER_TAG_DIFF
+
+    advisory = _advisory(
+        references=(Reference(type="FIX", url="https://github.com/psf/requests/pull/7"),)
+    )
+    crowded = "\n".join(f"def handler{index}():\n    return {index}" for index in range(60))
+    files = tuple(
+        (_file_diff(f"requests/part{index}.py", list(range(1, 121)), []), crowded, None)
+        for index in range(2)
+    )
+
+    result = extract_for_advisory(advisory, _pull_source(files))
+
+    assert result.status is SymbolsStatus.EXTRACTED
+    assert len(result.symbols) > MAX_SYMBOLS_PER_TAG_DIFF
+    assert {symbol.source for symbol in result.symbols} == {SymbolSource.FIX_COMMIT}
+    assert "merge request's range" in result.detail
+
+
+def test_a_release_is_still_labelled_and_capped() -> None:
+    """The other half of the same distinction, so neither drifts."""
+    advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
+    source = _release_source(
+        ((_file_diff("requests/sessions.py", [6, 7], []), POST_SOURCE, PRE_SOURCE),)
+    )
+
+    result = extract_for_advisory(advisory, source)
+
+    assert {symbol.source for symbol in result.symbols} == {SymbolSource.TAG_DIFF}
+    assert "release" in result.detail

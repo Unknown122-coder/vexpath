@@ -87,14 +87,27 @@ class FixReference:
         return self.commit is None
 
     @property
-    def is_release_range(self) -> bool:
-        """Whether this names a span of releases rather than one commit.
+    def spans_commits(self) -> bool:
+        """Whether the diff runs between two commits rather than from a parent.
 
-        Worth distinguishing everywhere it is read: a symbol found across a
-        release contains every change in that release, so it is evidence
-        about the release and only probably about the fix.
+        Mechanical: it says how to read the diff, nothing about how much the
+        result is worth. Both a release range and a resolved merge request
+        span commits.
         """
         return self.base is not None
+
+    @property
+    def is_release_diff(self) -> bool:
+        """Whether the span is a whole release rather than a fix.
+
+        Semantic, and the two were one property until a merge request could
+        also span commits -- at which point a pull request's symbols would
+        have been labelled ``tag_diff`` and capped at the size of a typical
+        fix commit. A pull request *is* the fix: it deserves neither the label
+        nor the cap. A release contains every change made since the last one,
+        and deserves both.
+        """
+        return self.base is not None and self.tier is FixReferenceTier.TAG_DERIVABLE
 
 
 class UnresolvableFixError(Exception):

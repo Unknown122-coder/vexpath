@@ -138,6 +138,14 @@ class CommitSource(Protocol):
         """
         ...
 
+    def resolve_pull_request(self, repository: str, number: int) -> tuple[str, str] | None:
+        """Return ``(base_commit, head_commit)`` for a merge request.
+
+        No forge API: the hosts this fetches from advertise the refs over
+        plain git, so this needs no token and has no hourly limit.
+        """
+        ...
+
 
 class GitCommitSource:
     """Fetch a commit with the git binary.
@@ -336,6 +344,85 @@ class GitCommitSource:
             return None
         return previous_tag[1], fixed_tag[1]
 
+    def resolve_pull_request(self, repository: str, number: int) -> tuple[str, str] | None:
+        """Turn a merge request into the pair of commits that bracket it.
+
+        1,343 PyPI advisories -- everything left after fix commits and release
+        tags -- point at a pull request and nothing else. There is no API call
+        here and no token: GitHub and the other hosts advertise
+        ``refs/pull/N/head`` and ``refs/pull/N/merge`` over plain git, so this
+        is two fetches at most and no rate limit at all.
+
+        ``/merge`` is preferred and rarely there. It is the test merge the
+        forge builds, whose first parent is the base and second is the branch,
+        so diffing between them is exactly the pull request and nothing else.
+        Measured across three large repositories, only 16% to 38% of pull
+        requests still have it -- it is kept for open ones.
+
+        ``/head`` is the fallback and is kept for ever. Its final commit is
+        diffed against its parent, which under-reports a branch of several
+        commits: the earlier ones are missed. That is the safe direction for
+        this tool, because a missed symbol produces "nobody could look" while
+        an invented one produces a confident wrong answer.
+
+        A ``/head`` that is itself a merge commit is refused rather than
+        diffed. Branches routinely merge the base back into themselves, and
+        diffing such a commit against its first parent attributes everything
+        the other branch brought to this fix -- hundreds of files that have
+        nothing to do with it.
+        """
+        if repository_host(repository) not in ALLOWED_HOSTS:
+            msg = f"refusing to contact {repository}, which is not on the allow-list"
+            raise FetchError(msg)
+
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            self._prepare(workspace, repository)
+
+            for suffix in ("merge", "head"):
+                reference = f"{_pull_ref_prefix(repository)}/{number}/{suffix}"
+                fetched = self._run(
+                    [
+                        "fetch",
+                        "--quiet",
+                        "--depth=2",
+                        "--filter=blob:none",
+                        repository,
+                        reference,
+                    ],
+                    workspace,
+                    timeout=self._fetch_timeout,
+                    allow_failure=True,
+                )
+                if fetched is None:
+                    continue
+
+                parents = (
+                    self._run(
+                        ["rev-list", "--parents", "-n", "1", "FETCH_HEAD"],
+                        workspace,
+                        allow_failure=True,
+                    )
+                    or ""
+                ).split()
+                if len(parents) < 2:
+                    # A root commit, or the rev-list failed. Nothing to diff
+                    # against either way.
+                    continue
+                head, ancestors = parents[0], parents[1:]
+
+                if suffix == "merge":
+                    if len(ancestors) < 2:
+                        continue
+                    return ancestors[0], ancestors[1]
+
+                if len(ancestors) != 1:
+                    # The branch tip is a merge. See the docstring.
+                    continue
+                return ancestors[0], head
+
+        return None
+
     def _list_tags(self, repository: str) -> dict[str, str]:
         """Every tag the remote advertises, as name to commit."""
         with tempfile.TemporaryDirectory() as directory:
@@ -479,6 +566,21 @@ def repository_host(repository: str) -> str:
     return without_scheme.split("/", 1)[0].lower()
 
 
+#: Where each host keeps its merge-request refs.
+#:
+#: GitHub and the Gitea-shaped hosts use ``refs/pull``; GitLab calls the same
+#: thing a merge request and uses ``refs/merge-requests``. Both are advertised
+#: over plain git, which is what lets this work without a forge API.
+_PULL_REF_PREFIXES = {
+    "gitlab.com": "refs/merge-requests",
+}
+_DEFAULT_PULL_REF_PREFIX = "refs/pull"
+
+
+def _pull_ref_prefix(repository: str) -> str:
+    return _PULL_REF_PREFIXES.get(repository_host(repository), _DEFAULT_PULL_REF_PREFIX)
+
+
 #: How projects spell the same release. Tried in order.
 TAG_SPELLINGS: tuple[str, ...] = ("{version}", "v{version}", "release-{version}", "rel-{version}")
 
@@ -592,6 +694,14 @@ class RecordedCommitSource:
             msg = f"no recorded diff for {key}"
             raise FetchError(msg)
         return self.diffs[key]
+
+    #: Merge request number to the pair of commits bracketing it. Empty by
+    #: default, which is a forge that advertises no pull refs.
+    pull_requests: dict[int, tuple[str, str]] = field(default_factory=dict)
+
+    def resolve_pull_request(self, repository: str, number: int) -> tuple[str, str] | None:
+        del repository
+        return self.pull_requests.get(number)
 
     def resolve_release_range(
         self, repository: str, fixed_version: str, *, affected_versions: Sequence[str] = ()
