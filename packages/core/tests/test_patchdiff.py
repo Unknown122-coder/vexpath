@@ -1268,3 +1268,61 @@ def test_a_release_is_still_labelled_and_capped() -> None:
 
     assert {symbol.source for symbol in result.symbols} == {SymbolSource.TAG_DIFF}
     assert "release" in result.detail
+
+
+# --- A fix commit the size of a refactor ---------------------------------
+
+
+def test_a_refactor_sized_fix_commit_is_refused() -> None:
+    """The most reluctant of the three caps, and the data insisted.
+
+    A fix commit is the strongest evidence there is -- the commit genuinely
+    is the fix, so the real symbol is somewhere inside it. That is why the
+    refactor threshold keeps every symbol and only lowers confidence.
+
+    It stops holding at this size. Over the PyPI corpus, 8 advisory/package
+    pairs out of 2,798 held 24% of every fix-commit symbol, and the worst
+    named 2,082 functions in sagemaker from one commit. Keeping them does
+    not find the vulnerable function; it guarantees a match whatever a
+    project imports.
+    """
+    from vexpath_core.patchdiff.fetch import MAX_SYMBOLS_PER_FIX_COMMIT
+
+    advisory = _advisory(
+        references=(Reference(type="FIX", url=f"https://github.com/psf/requests/commit/{SHA}"),)
+    )
+    crowded = _many_functions(80)
+    files = tuple(
+        (_file_diff(f"requests/part{index}.py", list(range(1, 161)), []), crowded, None)
+        for index in range(3)
+    )
+
+    result = extract_for_advisory(advisory, _recorded(files))
+
+    assert result.status is SymbolsStatus.NONE
+    assert f"above the {MAX_SYMBOLS_PER_FIX_COMMIT}" in result.detail
+    assert not result.symbols
+
+
+def test_a_large_but_plausible_fix_commit_is_kept() -> None:
+    """Between the refactor threshold and the cap, symbols survive.
+
+    A fix touching thirty functions is a real fix, and the refactor flag
+    already says what to think of it: every symbol kept, all of them at low
+    confidence, the advisory worth a human look.
+    """
+    from vexpath_core.patchdiff.extract import REFACTOR_SYMBOL_THRESHOLD
+
+    advisory = _advisory(
+        references=(Reference(type="FIX", url=f"https://github.com/psf/requests/commit/{SHA}"),)
+    )
+    thirty = _many_functions(30)
+    result = extract_for_advisory(
+        advisory,
+        _recorded(((_file_diff("requests/sessions.py", list(range(1, 61)), []), thirty, None),)),
+    )
+
+    assert result.status is SymbolsStatus.EXTRACTED
+    assert len(result.symbols) > REFACTOR_SYMBOL_THRESHOLD
+    assert result.best_confidence is Confidence.LOW
+    assert "refactor" in result.detail

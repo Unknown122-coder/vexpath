@@ -96,6 +96,26 @@ MAX_SYMBOLS_PER_TAG_DIFF = 25
 #: confident wrong answer in place of "nobody could look".
 MAX_SYMBOLS_PER_PULL_REQUEST = 60
 
+#: Symbols one fix commit may name for one package before it is refused.
+#:
+#: The last and most reluctant of the three caps, because a fix commit is the
+#: strongest evidence there is: the commit genuinely is the fix, so the real
+#: symbol is somewhere in it. That is why the refactor threshold above keeps
+#: every symbol and merely lowers confidence.
+#:
+#: It does not hold at this size. Measured over the PyPI corpus: 8
+#: advisory/package pairs out of 2,798 -- 0.3% -- held 24% of every
+#: fix-commit symbol, and 21 pairs held 35%. The worst named 2,082 functions
+#: in sagemaker from a single commit. Keeping them does not find the
+#: vulnerable function; it guarantees a match whatever a project imports,
+#: which is a confident wrong answer rather than the honest "nobody could
+#: look".
+#:
+#: Two hundred refuses those 21 pairs and nothing plausible. Between the
+#: refactor threshold and here, symbols are still kept at low confidence,
+#: because a fix touching thirty functions is a real fix.
+MAX_SYMBOLS_PER_FIX_COMMIT = 200
+
 #: Environment for every git call. Hooks off, no prompting, no system or user
 #: configuration, so a developer's own git settings cannot change what a scan
 #: concludes.

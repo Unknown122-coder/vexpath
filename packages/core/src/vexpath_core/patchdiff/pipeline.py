@@ -21,6 +21,7 @@ from vexpath_core.models.advisory import Advisory, AffectedPackage, VulnerableSy
 from vexpath_core.patchdiff.extract import extract
 from vexpath_core.patchdiff.fetch import (
     MAX_FILES_PER_TAG_DIFF,
+    MAX_SYMBOLS_PER_FIX_COMMIT,
     MAX_SYMBOLS_PER_PULL_REQUEST,
     MAX_SYMBOLS_PER_TAG_DIFF,
     CommitSource,
@@ -207,6 +208,21 @@ def extract_for_advisory(
                 f"commit names four at the median; a list this long is an inventory "
                 f"of the package rather than evidence about the fix, and would make "
                 f"every project importing it look reachable."
+            ),
+            notes=(*commit_diff.notes, *failures),
+        )
+
+    if not reference.spans_commits and len(collected) > MAX_SYMBOLS_PER_FIX_COMMIT:
+        return PatchDiffResult(
+            advisory_id=advisory.id,
+            status=SymbolsStatus.NONE,
+            reference=reference,
+            detail=(
+                f"The fix commit changed {len(collected)} functions in this package, "
+                f"above the {MAX_SYMBOLS_PER_FIX_COMMIT} allowed. A commit that size "
+                f"is a refactor, a reformat or a vendored update carrying the fix "
+                f"along with it, and naming all of it would match whatever a project "
+                f"imports."
             ),
             notes=(*commit_diff.notes, *failures),
         )
