@@ -173,3 +173,27 @@ def test_a_layout_class_does_not_strip_a_panel_s_padding() -> None:
             f".narrow sets {property_name}, which overrides .panel because it comes "
             f"later in the stylesheet. Keep .narrow to width and centring."
         )
+
+
+def test_the_home_page_survives_a_database_outage() -> None:
+    """A landing page must not depend on a number printed on it.
+
+    It did. Counting the corpus for the home page took a connection as a
+    dependency, so the front page answered 500 while /healthz answered 200 --
+    and this suite only passed because the developer's Postgres happened to
+    be running. CI, with no database, found it on the next push.
+
+    The count is decorative; the page is not. A failure costs one sentence.
+    """
+    settings = Settings(
+        env=Environment.TEST,
+        # Points at nothing, which is the whole point of the test.
+        database_url="postgresql+psycopg://nobody@127.0.0.1:1/none",
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Most of your dependency alerts cannot hurt you" in response.text
+    # The search still works -- it is a link, not a query.
+    assert 'action="/packages"' in response.text

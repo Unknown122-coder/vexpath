@@ -7,44 +7,69 @@ is for.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from vexpath_api.api_reference import sections
-from vexpath_api.auth import PublicConnection
-from vexpath_api.dependencies import get_settings_from_app
+from vexpath_api.dependencies import get_engine, get_settings_from_app
 from vexpath_api.templating import render
 from vexpath_core import __version__ as core_version
 from vexpath_core.enums import REACHABILITY_ECOSYSTEMS
 from vexpath_db.tables import vulnerable_symbols
+from vexpath_platform.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(include_in_schema=False)
 
 
 @router.get("/", response_class=HTMLResponse, summary="Home page")
-async def home(request: Request, connection: PublicConnection) -> HTMLResponse:
+async def home(
+    request: Request, engine: Annotated[AsyncEngine, Depends(get_engine)]
+) -> HTMLResponse:
     """The public home page.
 
-    Takes the public connection for one number: how many packages have had
-    their vulnerable functions extracted. A claim about the corpus should be
-    counted rather than written down, because a number in a template is
-    wrong the day after it is typed.
+    Reads one number -- how many packages have had their vulnerable functions
+    extracted -- because a claim about the corpus should be counted rather
+    than written down, and a number typed into a template is wrong the day
+    after it is typed.
+
+    The number is decorative and the page is not. Taking a connection as a
+    dependency made the landing page fail outright when the database was
+    unavailable: ``/healthz`` would answer while the front page returned 500.
+    So the engine arrives lazily, the count is attempted, and a failure
+    leaves the page with one sentence missing instead of no page at all.
     """
-    packages = (
-        await connection.execute(
-            select(func.count(func.distinct(vulnerable_symbols.c.package_name)))
-        )
-    ).scalar_one()
     return render(
         request,
         "index.html",
         {
             "core_version": core_version,
             "reachability_ecosystems": sorted(REACHABILITY_ECOSYSTEMS),
-            "package_count": packages,
+            "package_count": await _package_count(engine),
         },
     )
+
+
+async def _package_count(engine: AsyncEngine) -> int | None:
+    """Packages with extracted symbols, or None if the corpus cannot be read.
+
+    ``vulnerable_symbols`` is a global table the application may only read,
+    so this needs no tenant or public context -- just a connection.
+    """
+    try:
+        async with engine.connect() as connection:
+            result = await connection.execute(
+                select(func.count(func.distinct(vulnerable_symbols.c.package_name)))
+            )
+            return int(result.scalar_one())
+    except Exception as exc:  # noqa: BLE001 - any failure means "no number"
+        log.warning("api.home.package_count_unavailable", error=str(exc))
+        return None
 
 
 @router.get("/api", response_class=HTMLResponse, summary="API reference")

@@ -54,7 +54,8 @@ MEDIUM    not reachable  CVE-2024-47081   requests 2.25.0 -&gt; 2.32.4
 <section class="panel narrow">
   <h2>Look up a package</h2>
   <p>
-    For {{ "{:,}".format(package_count) }} packages the commits that fixed
+    {% if package_count %}For {{ "{:,}".format(package_count) }} packages the
+    commits{% else %}For thousands of packages the commits{% endif %} that fixed
     their advisories have already been diffed, so the exact functions each fix
     changed are recorded. Search one you depend on.
   </p>
