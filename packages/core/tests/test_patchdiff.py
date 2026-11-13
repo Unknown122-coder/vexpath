@@ -1047,7 +1047,7 @@ def test_a_release_naming_too_many_functions_is_refused() -> None:
 
     advisory = _advisory(references=(), repo_url="https://github.com/psf/requests")
     # Few files, many functions in each: the shape the file cap misses.
-    crowded = "\n".join(f"def handler{index}():\n    return {index}" for index in range(60))
+    crowded = _many_functions(60)
     files = tuple(
         (_file_diff(f"requests/part{index}.py", list(range(1, 121)), []), crowded, None)
         for index in range(3)
@@ -1140,6 +1140,11 @@ def test_a_changed_function_is_attributed_to_the_function() -> None:
 # this needs no token and has no hourly limit.
 
 
+def _many_functions(count: int) -> str:
+    """Source defining ``count`` module-level functions."""
+    return "\n".join(f"def handler{index}():\n    return {index}" for index in range(count))
+
+
 def _pull_source(files: tuple[object, ...]) -> RecordedCommitSource:
     return RecordedCommitSource(
         diffs={
@@ -1199,32 +1204,57 @@ def test_the_pull_ref_prefix_follows_the_forge() -> None:
     assert _pull_ref_prefix("https://gitlab.com/a/b") == "refs/merge-requests"
 
 
-def test_a_pull_request_is_not_labelled_or_capped_like_a_release() -> None:
-    """A pull request is the fix. A release merely contains it.
+def test_a_pull_request_is_judged_by_its_own_limit_not_a_release_s() -> None:
+    """Thorough fixes survive; inventories do not.
 
-    Both span two commits, and for a while that was the only distinction the
-    code made -- so a resolved merge request would have had its symbols
-    recorded as ``tag_diff`` and refused above twenty-five of them, the limit
-    that exists because a release diff is an inventory of everything shipped.
-    A branch that fixes one bug across thirty functions is still a fix.
+    A pull request is the fix, so a branch repairing one bug across thirty
+    functions must not be refused by the twenty-five allowed for a release
+    diff -- a release is an inventory of everything shipped since the last
+    one, which is a different thing.
+
+    It is still capped, and that half was learned from the data rather than
+    reasoned: with pull requests exempted entirely, the first real run
+    produced 1,505 symbols for one mlrun advisory and four vllm advisories
+    near 780 each.
     """
     from vexpath_core.patchdiff.fetch import MAX_SYMBOLS_PER_TAG_DIFF
 
     advisory = _advisory(
         references=(Reference(type="FIX", url="https://github.com/psf/requests/pull/7"),)
     )
-    crowded = "\n".join(f"def handler{index}():\n    return {index}" for index in range(60))
+    thorough = _many_functions(30)
+    result = extract_for_advisory(
+        advisory,
+        _pull_source(
+            ((_file_diff("requests/sessions.py", list(range(1, 61)), []), thorough, None),)
+        ),
+    )
+
+    assert result.status is SymbolsStatus.EXTRACTED
+    # More than a release would be allowed, and still accepted.
+    assert len(result.symbols) > MAX_SYMBOLS_PER_TAG_DIFF
+    assert {symbol.source for symbol in result.symbols} == {SymbolSource.FIX_COMMIT}
+    assert "merge request's range" in result.detail
+
+
+def test_a_merge_request_that_rewrites_the_package_is_refused() -> None:
+    """The regression that made this cap exist."""
+    from vexpath_core.patchdiff.fetch import MAX_SYMBOLS_PER_PULL_REQUEST
+
+    advisory = _advisory(
+        references=(Reference(type="FIX", url="https://github.com/psf/requests/pull/7"),)
+    )
+    crowded = _many_functions(60)
     files = tuple(
         (_file_diff(f"requests/part{index}.py", list(range(1, 121)), []), crowded, None)
-        for index in range(2)
+        for index in range(3)
     )
 
     result = extract_for_advisory(advisory, _pull_source(files))
 
-    assert result.status is SymbolsStatus.EXTRACTED
-    assert len(result.symbols) > MAX_SYMBOLS_PER_TAG_DIFF
-    assert {symbol.source for symbol in result.symbols} == {SymbolSource.FIX_COMMIT}
-    assert "merge request's range" in result.detail
+    assert result.status is SymbolsStatus.NONE
+    assert f"above the {MAX_SYMBOLS_PER_PULL_REQUEST}" in result.detail
+    assert not result.symbols
 
 
 def test_a_release_is_still_labelled_and_capped() -> None:

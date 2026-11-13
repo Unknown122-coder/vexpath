@@ -77,6 +77,25 @@ MAX_FILES_PER_TAG_DIFF = 40
 #: in place of an honest "nobody could look".
 MAX_SYMBOLS_PER_TAG_DIFF = 25
 
+#: Symbols a merge request may name before it is refused.
+#:
+#: Pull requests were exempted from the cap above on the reasoning that a
+#: pull request *is* the fix, so a branch repairing one bug across thirty
+#: functions should not be refused for being thorough. True, and not the
+#: whole story: the first real run produced 1,505 symbols for one mlrun
+#: advisory and four vllm advisories near 780 each. A ``/merge`` range on a
+#: branch that has fallen behind its base also carries the base's own drift,
+#: and some pull requests are refactors or vendored updates rather than
+#: fixes.
+#:
+#: Sixty, which is roughly three times the ninetieth percentile of a fix
+#: commit (21) and above the ninetieth percentile this run measured (53). It
+#: keeps the thorough fixes and refuses the inventories, on the same
+#: reasoning as the release cap: an advisory naming hundreds of functions
+#: makes every project importing the package look reachable, which is a
+#: confident wrong answer in place of "nobody could look".
+MAX_SYMBOLS_PER_PULL_REQUEST = 60
+
 #: Environment for every git call. Hooks off, no prompting, no system or user
 #: configuration, so a developer's own git settings cannot change what a scan
 #: concludes.

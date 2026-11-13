@@ -21,6 +21,7 @@ from vexpath_core.models.advisory import Advisory, AffectedPackage, VulnerableSy
 from vexpath_core.patchdiff.extract import extract
 from vexpath_core.patchdiff.fetch import (
     MAX_FILES_PER_TAG_DIFF,
+    MAX_SYMBOLS_PER_PULL_REQUEST,
     MAX_SYMBOLS_PER_TAG_DIFF,
     CommitSource,
     FetchError,
@@ -175,6 +176,25 @@ def extract_for_advisory(
         collected.extend(symbols)
         failures.extend(report.failures)
         refactor = refactor or report.looks_like_refactor
+
+    if (
+        reference.spans_commits
+        and not reference.is_release_diff
+        and len(collected) > MAX_SYMBOLS_PER_PULL_REQUEST
+    ):
+        return PatchDiffResult(
+            advisory_id=advisory.id,
+            status=SymbolsStatus.NONE,
+            reference=reference,
+            detail=(
+                f"The merge request changed {len(collected)} functions, above the "
+                f"{MAX_SYMBOLS_PER_PULL_REQUEST} allowed. A branch that large is a "
+                f"refactor, a vendored update, or a stale branch carrying its base's "
+                f"drift -- naming all of it as vulnerable would make every project "
+                f"importing this package look reachable."
+            ),
+            notes=(*commit_diff.notes, *failures),
+        )
 
     if reference.is_release_diff and len(collected) > MAX_SYMBOLS_PER_TAG_DIFF:
         return PatchDiffResult(
