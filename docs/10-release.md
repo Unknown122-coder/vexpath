@@ -153,6 +153,29 @@ Three things need accounts and are not done yet:
    `apps/action/tests/test_action.py` now, because each refusal arrives
    without naming the field at fault.
 
+## Publishing a release moves the corpus URL
+
+`vexpath advisory pull` fetches from
+`releases/latest/download/corpus.*`, and **latest** moves the moment a new
+release is published. A release without the corpus attached therefore breaks
+the command for everybody, including people who never upgrade -- the tool they
+already have starts getting a 404.
+
+So this is part of cutting a release, not an afterthought:
+
+```sh
+uv run python tools/publish_corpus.py vX.Y.Z var/snapshot-full
+```
+
+It cannot run in CI, because building a corpus takes hours of cloning
+upstream repositories and no job lives that long. It runs from a machine that
+has one, which is the honest reason this step is a human's.
+
+The script refuses a corpus with no symbols, which would be no better than the
+live query the client already falls back to -- but nothing yet refuses a
+*release* with no corpus. Until something does, the only thing standing
+between a release and a broken `advisory pull` is this paragraph.
+
 ## Version numbers
 
 `0.x` while the command surface can still move. `0.1.0` is the first release
