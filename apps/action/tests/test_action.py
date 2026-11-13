@@ -31,7 +31,11 @@ from vexpath import __version__ as cli_version
 from vexpath.exit_codes import ExitCode
 from vexpath.main import app
 
-ACTION = Path(__file__).resolve().parents[1] / "action.yml"
+#: The metadata lives at the repository root, not beside this test.
+#: GitHub only lists an action whose action.yml is in the root of its
+#: repository, so that is where it has to be -- the README, the tests and
+#: the documentation stay here.
+ACTION = Path(__file__).resolve().parents[3] / "action.yml"
 README = Path(__file__).resolve().parents[1] / "README.md"
 
 runner = CliRunner()

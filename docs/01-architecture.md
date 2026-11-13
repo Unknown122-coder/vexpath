@@ -136,6 +136,8 @@ There is no separate front-end application. The same FastAPI process serves JSON
 
 ### 2.6 `apps/action` — GitHub Action
 
+Its `action.yml` is at the **repository root**, not in this directory: GitHub lists an action only when the metadata sits in the root of its repository. The README, the tests and everything else about the action stay here.
+
 Docker-based action pinning a specific CLI version. Inputs: `policy`, `fail-on`, `upload`, `sbom-path`. Outputs: Checks API annotations (via SARIF upload to Code Scanning) and an optional PR comment rendered by `core.report`. Uses the runner's OIDC token for keyless Sigstore signing, so attestations carry the workflow identity.
 
 ## 3. Data flow: one scan, end to end

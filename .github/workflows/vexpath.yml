@@ -76,7 +76,7 @@ jobs:
 
       - name: Scan with our own Action
         id: vexpath
-        uses: ./apps/action
+        uses: ./
         with:
           # What this checkout just installed, rather than a release: the
           # point is to test the code in this commit.
