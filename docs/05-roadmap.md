@@ -51,7 +51,7 @@ Deviations from the original plan, and why:
 - **The first real symbol-coverage number is not in yet.** `vexpath advisory coverage` and the scheduled workflow measure it, but running a full OSV download has not happened here. That measurement is the first task of M2, and it gates the call-graph work.
 - **EPSS and CISA KEV enrichment is deferred to M2.** The fields, the storage and the reporting exist; only the two daily feeds are not wired up. They change prioritisation, not whether a finding is reported.
 
-## M2 · Reachability for Python (the differentiator) — **in progress**
+## M2 · Reachability for Python (the differentiator) — **complete 2026-11-13**
 
 ### Done: the engine
 
@@ -463,7 +463,7 @@ Acceptance:
 - Extracted-symbol coverage at or above 55 % of analysable PyPI advisories, which the 88.7 % fix-commit ceiling makes achievable; if below, the curated path is prioritised before M3.
 - 500-dependency scan with warm cache under 5 minutes on a 2-vCPU machine.
 
-## M3 · VEX, attestation, policy — **in progress**
+## M3 · VEX, attestation, policy — **complete 2026-11-13**
 
 ### Done: OpenVEX generation
 
@@ -637,7 +637,7 @@ Acceptance:
 - `cosign verify-attestation --type https://openvex.dev/ns/v0.2.0 --certificate-identity … --certificate-oidc-issuer …` succeeds on an attestation produced in GitHub Actions.
 - Policy presets behave as documented on the fixture results; a malformed policy exits with code 3 and a line-pointed error.
 
-## M4 · Hosted platform and public pages — **done** (except the live deploy, which needs the owner's accounts)
+## M4 · Hosted platform and public pages — **complete 2026-11-11**, deployed
 
 ### Done: tenant isolation
 
@@ -1337,7 +1337,7 @@ account, the Neon database, the R2 bucket and the GitHub OAuth app, all of
 which are the owner's to create. The runbook is written so that is one sitting
 rather than a project.
 
-## M5 · GitHub Action, distribution, launch
+## M5 · GitHub Action, distribution, launch — **complete 2026-11-13**
 
 ### Done: the Action, the release pipeline, and the launch documentation
 
@@ -1399,15 +1399,35 @@ and ours about yours, and a limitations page with the per-ecosystem capability
 matrix. The README points at limitations first, deliberately — it is the page
 that says what this does badly.
 
-### Remaining, and each needs an account rather than code:
-- `apps/action` published to the Marketplace (needs the repository public and a release).
-- `vexpath` on PyPI, and the image on GHCR (needs the PyPI project with Trusted Publishing configured).
-- The badge in this README, pointing at this repository's own public report (needs the platform deployed).
-- Portfolio site entry linking to that report.
+### Done, 2026-11-13
 
-Acceptance:
-- The Action runs on three external repositories (invite friends/colleagues) and their feedback is logged as issues.
-- Release pipeline produces verifiable provenance (`slsa-verifier` passes).
+- [`vexpath` on PyPI](https://pypi.org/project/vexpath/): 0.1.0, 0.1.1, 0.1.2,
+  published by Trusted Publishing, so no API token exists to leak.
+- The image on GHCR, with its own buildx provenance and, since the repository
+  went public, a GitHub artifact attestation.
+- [The Action on Marketplace](https://github.com/marketplace/actions/vexpath).
+  Its `action.yml` had to move to the repository root, which is the only place
+  GitHub lists one from, and its description had to fit 125 characters.
+- The badge in the README, pointing at
+  [this repository's own report](https://vexpath.fly.dev/p/unknown122-coder/vexpath).
+  It says *none reachable* rather than *passing*.
+- The platform deployed at [vexpath.fly.dev](https://vexpath.fly.dev).
+
+### Still open
+
+- **Portfolio site entry** linking to the report. Not started.
+- **The Action running on three external repositories**, with their feedback
+  logged as issues. This needs other people, which is the one input no amount
+  of work here produces.
+- **`slsa-verifier` run against a published artifact.** The provenance exists
+  and was read: SLSA v0.2, one signature, twelve subjects, naming commit
+  9a92bac at `refs/tags/v0.1.2`. Its *contents* are right. The cryptographic
+  verification is one command with a Go binary nobody has run yet, and until
+  somebody does, this criterion is unmet rather than met.
+- **The benchmark is five repositories, not twenty-five.** Every headline
+  number in this document -- 68 of 146 findings cleared, Flask from 38 to 10 --
+  rests on those five. It is the number most worth growing, because it is the
+  one a sceptical reader will push on first.
 
 ## Post-v1 backlog (not scheduled)
 

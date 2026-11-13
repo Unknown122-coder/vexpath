@@ -146,14 +146,20 @@ Three things need accounts and are not done yet:
    rules need GitHub Pro or Team on a private repository; without them the
    environments still work, and the gate is simply that a tag has to be
    pushed deliberately.
-3. **The Action on the Marketplace**, which needs the repository public and a
-   release published. The Action itself is finished and this repository runs
-   it on itself on every push.
+3. **The Action on the Marketplace** — listed since 2026-11-13. Two things
+   the publish form insists on and says nothing about until it refuses:
+   `action.yml` has to be in the **root** of the repository, and the
+   `description` has to be under 125 characters. Both are asserted by
+   `apps/action/tests/test_action.py` now, because each refusal arrives
+   without naming the field at fault.
 
 ## Version numbers
 
 `0.x` while the command surface can still move. `0.1.0` is the first release
-anybody is asked to install; `0.0.1` was the scaffold. The things that
+anybody is asked to install; `0.0.1` was the scaffold. `0.1.2` is the first
+cut from a public repository, and so the first whose image carries a GitHub
+artifact attestation: the API refuses to record one for a private
+user-owned repository, which is why that job failed on the two before it. The things that
 constrain a bump:
 
 - **`vexpath.results/N`**, the results schema identifier, which the platform
