@@ -1,6 +1,6 @@
 [project]
 name = "vexpath"
-version = "0.1.4"
+version = "0.1.5"
 description = "Command-line tool: generate SBOMs, match advisories, analyse reachability and emit signed VEX."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -45,7 +45,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "vexpath-core==0.1.4",
+    "vexpath-core==0.1.5",
     "typer>=0.15",
     "rich>=13.9",
 ]

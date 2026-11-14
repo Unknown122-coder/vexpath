@@ -1,6 +1,6 @@
 {
   "content_sha256": "26aed3c27904f921147c015457e1cacf87def1ad39abcbe1a19ac60b6516efe3",
-  "core_version": "0.1.4",
+  "core_version": "0.1.5",
   "counts": {
     "PyPI": {
       "advisories": 7,

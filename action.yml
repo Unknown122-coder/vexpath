@@ -180,7 +180,7 @@ runs:
         # The version this action was released alongside. A test asserts it
         # matches the command line's own version, so the action cannot ship
         # pointing at a release that does not exist.
-        pinned="0.1.4"
+        pinned="0.1.5"
         spec='${{ inputs.vexpath-version }}'
         if [ -z "$spec" ]; then
           spec="vexpath==${pinned}"
