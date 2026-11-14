@@ -111,6 +111,16 @@ jobs:
     with:
       base64-subjects: ${{ needs.build.outputs.hashes }}
       upload-assets: true
+      # Created as a draft, and that is the mechanism that stops a release
+      # with no corpus attached from breaking `vexpath advisory pull` for
+      # everybody. The command fetches releases/latest/download/corpus.*, and
+      # GitHub's "latest" skips drafts -- so until the corpus is attached,
+      # latest stays on the previous release and every existing install keeps
+      # working. `tools/publish_corpus.py` attaches it, checks the release
+      # holds everything the client needs, and publishes the draft; nothing
+      # else does. Before this, the only thing standing between a release and
+      # a broken command for every user was a paragraph in the runbook.
+      draft-release: "true"
       # The generator has a privacy check that fails on a private repository
       # unless this says otherwise, and the check is right to exist: the
       # provenance is signed through Sigstore and the signature is recorded

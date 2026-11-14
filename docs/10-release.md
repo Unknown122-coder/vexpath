@@ -153,28 +153,40 @@ Three things need accounts and are not done yet:
    `apps/action/tests/test_action.py` now, because each refusal arrives
    without naming the field at fault.
 
-## Publishing a release moves the corpus URL
+## Attaching the corpus is what publishes the release
 
-`vexpath advisory pull` fetches from
-`releases/latest/download/corpus.*`, and **latest** moves the moment a new
-release is published. A release without the corpus attached therefore breaks
-the command for everybody, including people who never upgrade -- the tool they
-already have starts getting a 404.
+`vexpath advisory pull` fetches `releases/latest/download/corpus.*`, and
+**latest** moves the moment a release is published. A release without the
+corpus attached therefore breaks the command for everybody, including people
+who never upgrade -- the tool they already have starts getting a 404.
 
-So this is part of cutting a release, not an afterthought:
+So the release is created as a **draft**, and this step publishes it:
 
 ```sh
 uv run python tools/publish_corpus.py vX.Y.Z var/snapshot-full
 ```
 
-It cannot run in CI, because building a corpus takes hours of cloning
-upstream repositories and no job lives that long. It runs from a machine that
-has one, which is the honest reason this step is a human's.
+GitHub's *latest* skips drafts. Until the corpus is attached, latest stays on
+the previous release and every install already out there keeps working, so a
+release nobody finishes is invisible rather than broken. The script uploads
+the corpus, reads back what the release actually holds, refuses to publish if
+anything the client downloads is absent, and only then clears the draft flag.
+It also still refuses a corpus with no symbols, which would be no better than
+the live query the client already falls back to.
 
-The script refuses a corpus with no symbols, which would be no better than the
-live query the client already falls back to -- but nothing yet refuses a
-*release* with no corpus. Until something does, the only thing standing
-between a release and a broken `advisory pull` is this paragraph.
+This cannot run in CI, because building a corpus takes hours of cloning
+upstream repositories and no job lives that long. It runs from a machine that
+has one, which is the honest reason this step is a human's -- and the draft is
+what stops that human being the only safeguard. `infra/tests/test_release_gate.py`
+holds the mechanism to it.
+
+Two consequences worth knowing. The PyPI packages are published by the
+workflow regardless, so between the tag and the corpus upload the new version
+is installable and its `advisory pull` serves the *previous* release's corpus
+-- which is correct rather than merely tolerable: a corpus is verified against
+its own content hash and is not tied to a client version. And the GitHub
+release object only appears near the end of the workflow, after the image and
+provenance jobs, so running the script too early answers "release not found".
 
 ## Version numbers
 

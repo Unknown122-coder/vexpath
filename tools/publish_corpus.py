@@ -15,15 +15,25 @@ runs rather than a workflow step.
 The files are uploaded as `corpus.snapshot.json` and `corpus.advisories.jsonl.gz`,
 which is what `DEFAULT_CORPUS_URL` expects of
 `releases/latest/download/corpus.*`.
+
+**This is also what publishes the release.** The release workflow creates it as
+a draft, because `releases/latest` skips drafts: until the corpus is attached,
+"latest" stays on the previous release and every install already out there
+keeps working. So a release that nobody attaches a corpus to is invisible
+rather than broken, and the thing that makes it visible is the step that
+cannot forget the corpus -- this one, which refuses to publish a release
+missing anything the client downloads.
 """
 
 from __future__ import annotations
 
 import gzip
+import json
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from vexpath_core.snapshot import ADVISORIES_FILE, SNAPSHOT_METADATA_FILE, read_snapshot
@@ -35,6 +45,22 @@ ROOT = Path(__file__).resolve().parents[1]
 #: names and ``DEFAULT_CORPUS_URL`` have to agree.
 PUBLISHED_METADATA = "corpus.snapshot.json"
 PUBLISHED_ADVISORIES = "corpus.advisories.jsonl.gz"
+
+#: What a release must hold before it may be published. Every name here is one
+#: the command line downloads, so a release missing any of them is one that
+#: answers 404 to `vexpath advisory pull`.
+REQUIRED_ASSETS = (PUBLISHED_METADATA, PUBLISHED_ADVISORIES)
+
+
+def missing_assets(present: Iterable[str], required: Sequence[str] = REQUIRED_ASSETS) -> list[str]:
+    """Which required assets a release does not hold, in the order required.
+
+    Separated from the subprocess work so the refusal can be tested without a
+    network, a token or a release: the decision is the part worth testing, and
+    `gh` is not.
+    """
+    have = set(present)
+    return [name for name in required if name not in have]
 
 
 def main() -> int:
@@ -103,7 +129,55 @@ def main() -> int:
         if result.returncode != 0:
             return result.returncode
 
-    print(f"published. 'vexpath advisory pull' now serves this corpus from {tag}")
+    return _publish_release(gh, tag)
+
+
+def _publish_release(gh: str, tag: str) -> int:
+    """Publish the draft, once the release holds everything the client needs.
+
+    The check is the point of the draft: this runs after the upload, reads
+    back what the release actually holds rather than what was just sent, and
+    refuses to publish if anything the command line downloads is absent. A
+    release that fails this stays a draft, so `latest` stays where it was and
+    nobody's `advisory pull` breaks while it is sorted out.
+    """
+    view = subprocess.run(  # noqa: S603 - a fixed command, no shell
+        [gh, "release", "view", tag, "--json", "isDraft,assets"],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if view.returncode != 0:
+        detail = view.stderr.strip() or f"exit {view.returncode}"
+        print(f"could not read release {tag}: {detail}", file=sys.stderr)
+        return 1
+
+    payload = json.loads(view.stdout)
+    present = [asset["name"] for asset in payload.get("assets", ())]
+    absent = missing_assets(present)
+    if absent:
+        print(
+            f"refusing to publish {tag}: it is missing {', '.join(absent)}, which "
+            f"'vexpath advisory pull' downloads. The release stays a draft, so "
+            f"latest still points at the previous one and nobody's pull is broken.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not payload.get("isDraft"):
+        print(f"{tag} was already published; its corpus is now the one just uploaded")
+        return 0
+
+    edit = subprocess.run(  # noqa: S603 - a fixed command, no shell
+        [gh, "release", "edit", tag, "--draft=false"],
+        cwd=str(ROOT),
+        check=False,
+    )
+    if edit.returncode != 0:
+        return edit.returncode
+
+    print(f"published {tag}. 'vexpath advisory pull' now serves this corpus")
     return 0
 
 
