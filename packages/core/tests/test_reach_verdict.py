@@ -24,7 +24,13 @@ from vexpath_core.enums import (
 from vexpath_core.models.advisory import VulnerableSymbol
 from vexpath_core.models.finding import AdvisoryRef, ComponentRef, EntryPointInfo, Finding
 from vexpath_core.reach.graph import CallGraph, Edge, GraphQuality, Node, link, search
-from vexpath_core.reach.verdict import ReachabilityContext, apply, decide, mentioned_symbols
+from vexpath_core.reach.verdict import (
+    ReachabilityContext,
+    apply,
+    decide,
+    import_roots,
+    mentioned_symbols,
+)
 
 PACKAGE = "requests"
 TARGET = "requests.sessions.Session.send"
@@ -75,6 +81,7 @@ def _context(
         entry_points=EntryPointInfo(source=source, count=2, items=entry_points),
         analysed_packages=analysed,
         mentioned=mentioned_symbols(graph),
+        import_names=import_roots(graph),
     )
 
 
@@ -526,3 +533,220 @@ def test_a_possible_verdict_still_cannot_be_unexplained() -> None:
             matched_symbols=("lib.danger",),
             via_dynamic_edges=False,
         )
+
+
+# --- The advisory's name is not always this version's name ------------------
+#
+# Taken from a real scan. python-multipart renamed the package it installs
+# from ``multipart`` to ``python_multipart``, so symbols extracted from its
+# fix commits are rooted at the new name while 0.0.9 ships the same code under
+# the old one. Eight findings on one project came back undecidable with the
+# vulnerable method sitting in the graph the whole time.
+
+DISTRIBUTION = "python-multipart"
+#: What the corpus holds, extracted from a fix commit in the newer layout.
+ADVISORY_SYMBOL = "python_multipart.multipart.MultipartParser._internal_write"
+#: What 0.0.9 actually installs: the same code, a different root.
+INSTALLED_SYMBOL = "multipart.multipart.MultipartParser._internal_write"
+
+
+def _renamed_graph(*, reachable: bool) -> CallGraph:
+    nodes = {
+        "app.main": Node("app.main", SymbolKind.MODULE, file="app/main.py", line=1),
+        "app.main.run": Node("app.main.run", SymbolKind.FUNCTION, file="app/main.py", line=4),
+        INSTALLED_SYMBOL: Node(
+            INSTALLED_SYMBOL,
+            SymbolKind.METHOD,
+            file="multipart/multipart.py",
+            line=700,
+            package=DISTRIBUTION,
+        ),
+    }
+    edges: dict[str, tuple[Edge, ...]] = {
+        "app.main": (Edge("app.main", "app.main.run", EdgeKind.IMPORT, 1),)
+    }
+    if reachable:
+        edges["app.main.run"] = (Edge("app.main.run", INSTALLED_SYMBOL, EdgeKind.STATIC, 5),)
+    return CallGraph(nodes=nodes, edges=edges, quality=GraphQuality(call_sites=10, files_parsed=2))
+
+
+def _renamed_symbol(symbol: str = ADVISORY_SYMBOL) -> VulnerableSymbol:
+    return VulnerableSymbol(
+        advisory_id="CVE-2026-53539",
+        ecosystem="PyPI",
+        package_name=DISTRIBUTION,
+        symbol=symbol,
+        kind=SymbolKind.METHOD,
+        source=SymbolSource.FIX_COMMIT,
+        confidence=Confidence.HIGH,
+    )
+
+
+def _renamed_context(graph: CallGraph) -> ReachabilityContext:
+    return _context(graph, analysed=frozenset({DISTRIBUTION}))
+
+
+def test_a_renamed_import_package_is_recognised() -> None:
+    """The finding this was built for: decidable instead of undecidable."""
+    graph = _renamed_graph(reachable=True)
+    result = decide(_finding(name=DISTRIBUTION), [_renamed_symbol()], _renamed_context(graph))
+
+    assert result.status is ReachStatus.REACHABLE_CONFIRMED
+    assert result.matched_symbols == (INSTALLED_SYMBOL,)
+    # Reported under the name the reader can find in their own environment.
+    assert result.searched_symbols == (INSTALLED_SYMBOL,)
+
+
+def test_a_renamed_symbol_says_the_name_was_changed() -> None:
+    """Otherwise the report and the advisory disagree for no visible reason."""
+    graph = _renamed_graph(reachable=True)
+    result = decide(_finding(name=DISTRIBUTION), [_renamed_symbol()], _renamed_context(graph))
+
+    assert "python_multipart in the advisory, multipart here" in result.explanation
+
+
+def test_a_renamed_symbol_does_not_claim_full_confidence() -> None:
+    """The match is strong evidence, not something the advisory said.
+
+    The tail of the name matching exactly, against a definition that really
+    exists, is most of the way to certain -- but which root belongs to which
+    version is this tool's inference, so a verdict resting on it says medium.
+    """
+    graph = _renamed_graph(reachable=True)
+    result = decide(_finding(name=DISTRIBUTION), [_renamed_symbol()], _renamed_context(graph))
+
+    assert result.confidence is Confidence.MEDIUM
+
+
+def test_a_renamed_symbol_that_is_not_called_is_cleared() -> None:
+    """The risky direction, so it is asserted rather than assumed.
+
+    A rewrite makes a clearance possible where there was none, which is the
+    one outcome that can be wrong in the user's favour. It is allowed here
+    because the symbol was found and searched for: the package was traversed
+    and nothing calls it.
+    """
+    graph = _renamed_graph(reachable=False)
+    finding = apply(_finding(name=DISTRIBUTION), [_renamed_symbol()], _renamed_context(graph))
+
+    assert finding.reach is not None
+    assert finding.reach.status is ReachStatus.UNREACHABLE
+    assert finding.verdict is Verdict.NOT_AFFECTED
+    assert "different import name" in finding.reach.explanation
+
+
+def test_a_rewrite_never_invents_a_target() -> None:
+    """A candidate is accepted only when the graph already defines it.
+
+    Substituting roots blindly would let any advisory match any package that
+    happens to share a module path, which would manufacture reachable
+    verdicts. A symbol that exists under no provided root stays undecided.
+    """
+    graph = _renamed_graph(reachable=True)
+    gone = _renamed_symbol("python_multipart.multipart.MultipartParser.deleted_in_this_version")
+    result = decide(_finding(name=DISTRIBUTION), [gone], _renamed_context(graph))
+
+    assert result.status is ReachStatus.SYMBOLS_UNKNOWN
+    assert result.reason is ReachReason.SYMBOLS_NOT_IN_VERSION
+    assert result.searched_symbols == (gone.symbol,)
+    # No single cause is asserted, because the message used to blame a
+    # function rename for what was an import-package rename.
+    assert "renamed, moved to another module, or did not exist yet" in result.explanation
+
+
+def test_a_name_that_already_matches_is_left_alone() -> None:
+    """No note, and no lowered confidence, when nothing was rewritten."""
+    graph = _renamed_graph(reachable=True)
+    result = decide(
+        _finding(name=DISTRIBUTION), [_renamed_symbol(INSTALLED_SYMBOL)], _renamed_context(graph)
+    )
+
+    assert result.status is ReachStatus.REACHABLE_CONFIRMED
+    assert result.confidence is Confidence.HIGH
+    assert "import name" not in result.explanation
+
+
+def test_a_package_with_no_graph_is_not_rewritten() -> None:
+    """Nothing to check a candidate against, so nothing is attempted.
+
+    The verdict is the same admitted unknown it was before: an absence of
+    paths through code that was never traversed proves nothing, and a rewrite
+    cannot change that.
+    """
+    graph = _renamed_graph(reachable=False)
+    context = _context(graph, analysed=frozenset())
+    result = decide(_finding(name=DISTRIBUTION), [_renamed_symbol()], context)
+
+    assert result.status is ReachStatus.SYMBOLS_UNKNOWN
+    assert result.reason is ReachReason.PACKAGE_NOT_ANALYSED
+
+
+def test_import_roots_ignores_first_party_code() -> None:
+    """A project's own modules are not a distribution's import names."""
+    roots = import_roots(_renamed_graph(reachable=True))
+
+    assert roots == {DISTRIBUTION: frozenset({"multipart"})}
+
+
+def _package_root_graph(*, roots: tuple[str, ...] = ("multipart",)) -> CallGraph:
+    """A graph where the distribution's module root is imported by the project."""
+    nodes = {
+        "app.main": Node("app.main", SymbolKind.MODULE, file="app/main.py", line=1),
+        "app.main.run": Node("app.main.run", SymbolKind.FUNCTION, file="app/main.py", line=4),
+    }
+    for name in roots:
+        nodes[name] = Node(
+            name, SymbolKind.MODULE, file=f"{name}/__init__.py", line=1, package=DISTRIBUTION
+        )
+    return CallGraph(
+        nodes=nodes,
+        edges={
+            "app.main": (
+                Edge("app.main", "app.main.run", EdgeKind.IMPORT, 1),
+                Edge("app.main", roots[0], EdgeKind.IMPORT, 2),
+            )
+        },
+        quality=GraphQuality(call_sites=10, files_parsed=2),
+    )
+
+
+def test_a_renamed_package_root_is_matched_rather_than_cleared() -> None:
+    """A module-level fix is recorded as the bare package name.
+
+    Leaving that name alone meant it was never searched for, and a finding
+    could then be *cleared* because nothing reached a symbol nobody looked
+    for. An unearned clearance is the one failure this whole module exists to
+    prevent, so the bare name is rewritten like any other.
+    """
+    graph = _package_root_graph()
+    symbol = _renamed_symbol("python_multipart")
+    result = decide(
+        _finding(name=DISTRIBUTION),
+        [symbol.model_copy(update={"kind": SymbolKind.MODULE})],
+        _renamed_context(graph),
+    )
+
+    assert result.searched_symbols == ("multipart",)
+    assert result.status is ReachStatus.REACHABLE_POSSIBLE
+    assert result.reason is ReachReason.MODULE_LEVEL_ONLY
+    assert "different import name" in result.explanation
+
+
+def test_an_ambiguous_package_root_is_not_guessed() -> None:
+    """Two importable roots and no tail to tell them apart.
+
+    The dotted case is decided by the rest of the name matching a definition
+    that exists. A bare name has no such evidence, so with more than one
+    candidate the honest answer is the admitted unknown.
+    """
+    graph = _package_root_graph(roots=("multipart", "multipart_extras"))
+    symbol = _renamed_symbol("python_multipart")
+    result = decide(
+        _finding(name=DISTRIBUTION),
+        [symbol.model_copy(update={"kind": SymbolKind.MODULE})],
+        _renamed_context(graph),
+    )
+
+    assert result.status is ReachStatus.SYMBOLS_UNKNOWN
+    assert result.reason is ReachReason.SYMBOLS_NOT_IN_VERSION
+    assert result.searched_symbols == ("python_multipart",)

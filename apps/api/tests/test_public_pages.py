@@ -563,13 +563,23 @@ def _wipe_corpus(engine: Engine) -> None:
 def test_the_index_lists_packages_with_the_most_advisories_first(
     client: TestClient, corpus: None
 ) -> None:
-    body = client.get("/packages").text
+    """Narrowed to the fixture's own packages, which is what it is testing.
+
+    This used to read the unfiltered first page, which passed only against a
+    near-empty database: once a real corpus is loaded, three fixture
+    advisories rank below every genuine package and the fixture rows are
+    pages away. The ordering is applied after the filter, so querying for
+    them tests the same ordering without assuming the database holds nothing
+    else.
+    """
+    body = client.get(f"/packages?q={INDEX_PREFIX}").text
 
     assert f"/package/PyPI/{INDEX_PREFIX}-busy" in body
     assert f"/package/PyPI/{INDEX_PREFIX}-quiet" in body
     # Busiest first: a package with many advisories is the one somebody is
     # most likely looking for.
     assert body.index(f"{INDEX_PREFIX}-busy") < body.index(f"{INDEX_PREFIX}-quiet")
+    assert body.index(f"{INDEX_PREFIX}-middle") < body.index(f"{INDEX_PREFIX}-quiet")
 
 
 def test_a_partial_name_finds_the_package(client: TestClient, corpus: None) -> None:

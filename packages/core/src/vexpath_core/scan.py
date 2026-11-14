@@ -41,6 +41,7 @@ from vexpath_core.reach import (
     apply,
     build,
     choose,
+    import_roots,
     link,
     mentioned_symbols,
     search,
@@ -243,6 +244,7 @@ def prepare_reachability(
         entry_points=entry_points,
         analysed_packages=frozenset(dependencies.analysed),
         mentioned=mentioned_symbols(graph),
+        import_names=import_roots(graph),
     )
 
     notes: list[str] = []

@@ -36,7 +36,13 @@ from vexpath_core.reach.graph import (
     search,
 )
 from vexpath_core.reach.pybuild import SourceRoot, build, detect_entry_points
-from vexpath_core.reach.verdict import ReachabilityContext, apply, decide, mentioned_symbols
+from vexpath_core.reach.verdict import (
+    ReachabilityContext,
+    apply,
+    decide,
+    import_roots,
+    mentioned_symbols,
+)
 
 __all__ = [
     "BUILDER_VERSION",
@@ -55,6 +61,7 @@ __all__ = [
     "decide",
     "detect_entry_points",
     "expand_targets",
+    "import_roots",
     "is_inferred",
     "link",
     "matched_symbols",

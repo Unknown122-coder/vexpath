@@ -29,6 +29,7 @@ from vexpath_core.reach import (
     apply,
     build,
     choose,
+    import_roots,
     link,
     mentioned_symbols,
     search,
@@ -85,6 +86,7 @@ def _analyse(root: Path, advisories: dict[str, Advisory]) -> list[Outcome]:
         entry_points=info,
         analysed_packages=frozenset(analysed),
         mentioned=mentioned_symbols(graph),
+        import_names=import_roots(graph),
     )
 
     outcomes: list[Outcome] = []
