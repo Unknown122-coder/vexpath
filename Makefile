@@ -35,7 +35,13 @@ e2e: ## Run the browser acceptance suite (needs `make up` and a browser)
 	$(UV) run pytest -m e2e apps/api/tests/e2e -v
 
 test-all: ## Run every test including integration (needs `make up`)
-	$(UV) run pytest -m "not network and not benchmark"
+# "not e2e" is repeated here rather than inherited: a -m on the command line
+# *replaces* the one in addopts, so leaving it out silently collected the
+# browser suite into the same process as the asynchronous database tests. Its
+# session-scoped browser fixture takes the proactor event-loop policy and
+# holds it for the rest of the session, after which psycopg cannot connect --
+# which arrived as 55 failures and 408 errors in tests that pass on their own.
+	$(UV) run pytest -m "not e2e and not network and not benchmark"
 
 cov: ## Unit tests with a coverage report
 	$(UV) run pytest -m "not integration and not network and not benchmark" \

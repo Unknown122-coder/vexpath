@@ -108,7 +108,11 @@ jobs:
         run: uv run python -m vexpath_worker.main seed-advisories testdata/advisories
 
       - name: Integration tests
-        run: uv run pytest -m "integration and not network and not benchmark"
+        # "not e2e" for the reason the Makefile gives: a command-line -m
+        # replaces the default deselection, and this selector would otherwise
+        # pull in the browser suite. It passes here only because chromium is
+        # absent and the fixture skips, which is luck rather than design.
+        run: uv run pytest -m "integration and not e2e and not network and not benchmark"
 
       - name: Check migrations reverse cleanly
         # A migration that cannot be rolled back is a migration that cannot be

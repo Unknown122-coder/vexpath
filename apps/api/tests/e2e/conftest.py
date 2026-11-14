@@ -57,6 +57,38 @@ ORG_SLUG = "acceptance"
 SECRET_KEY = "a-process-secret-for-the-acceptance-tests"
 
 
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip this suite rather than corrupt the process it was collected into.
+
+    The constraint above was written down and still broken twice, because
+    nothing enforced it: a ``-m`` on the command line replaces the ``-m 'not
+    e2e'`` in addopts, so any selector that forgets to repeat it collects
+    these tests alongside the asynchronous database tests. The
+    :func:`browser` fixture then installs the proactor policy for the rest of
+    the session and every psycopg test after it fails -- far from here, in
+    tests that pass when run on their own, which is the worst possible place
+    for the symptom to appear.
+
+    So when the session holds anything that is not an e2e test, the e2e tests
+    skip and say what to run instead. A suite that runs alone -- ``make e2e``,
+    where everything collected is e2e -- is untouched.
+    """
+    del config
+    e2e = [item for item in items if item.get_closest_marker("e2e") is not None]
+    if not e2e or len(e2e) == len(items):
+        return
+
+    skip = pytest.mark.skip(
+        reason=(
+            "the acceptance suite needs its own process (Playwright wants the "
+            "proactor event loop, psycopg the selector one) and this session "
+            "also collected other tests; run 'make e2e'"
+        )
+    )
+    for item in e2e:
+        item.add_marker(skip)
+
+
 def _free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))

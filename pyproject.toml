@@ -140,6 +140,10 @@ pythonpath = ["."]
 # asynchronous mode needs the selector one. The policy is process-wide, so a
 # run that mixed them would leave whichever came second unable to work --
 # which it did, as 387 errors in one run and none in either suite alone.
+# A -m on the command line REPLACES this one rather than adding to it, so
+# every selector that needs the e2e suite left out has to say "not e2e"
+# itself. See apps/api/tests/e2e/conftest.py, which now enforces that instead
+# of trusting it.
 addopts = "-ra --strict-markers --strict-config --import-mode=importlib -m 'not e2e'"
 asyncio_mode = "auto"
 # Pin the fixture loop scope rather than inherit a default that pytest-asyncio
