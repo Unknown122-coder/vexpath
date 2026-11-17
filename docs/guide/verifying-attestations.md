@@ -23,8 +23,11 @@ slsa-verifier verify-artifact vexpath-0.1.5-py3-none-any.whl \
   --source-uri github.com/Unknown122-coder/vexpath \
   --source-tag v0.1.5
 
-# The container image. Needs the GHCR package to be public, which a package is
-# not by default even when its repository is.
+# The container image. Needs no login: the package is public. Worth knowing if
+# you fork this, because a GHCR package is private by default even when its
+# repository is public, and making the repository public does not change it --
+# so `docker pull` and this command both fail with an authorization error
+# until the package's own visibility is changed.
 gh attestation verify oci://ghcr.io/unknown122-coder/vexpath:0.1.5 \
   --repo Unknown122-coder/vexpath
 ```
