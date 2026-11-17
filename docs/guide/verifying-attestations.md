@@ -12,15 +12,20 @@ your SBOM or your VEX document. This is what a reviewer does with it.
 ## Verifying a vexpath release
 
 ```bash
-# The distributions, against the provenance produced by the official
-# SLSA generator.
-slsa-verifier verify-artifact vexpath-0.1.0-py3-none-any.whl \
-  --provenance-path vexpath-0.1.0-py3-none-any.whl.intoto.jsonl \
-  --source-uri github.com/Unknown122-coder/vexpath \
-  --source-tag v0.1.0
+# Two files from two places: the wheel is on PyPI, the provenance is an asset
+# of the GitHub release. One provenance file covers every artifact of a
+# release, which is why it is not named after any one of them.
+pip download vexpath==0.1.5 --no-deps -d .
+gh release download v0.1.5 --repo Unknown122-coder/vexpath -p multiple.intoto.jsonl
 
-# The container image.
-gh attestation verify oci://ghcr.io/unknown122-coder/vexpath:0.1.0 \
+slsa-verifier verify-artifact vexpath-0.1.5-py3-none-any.whl \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/Unknown122-coder/vexpath \
+  --source-tag v0.1.5
+
+# The container image. Needs the GHCR package to be public, which a package is
+# not by default even when its repository is.
+gh attestation verify oci://ghcr.io/unknown122-coder/vexpath:0.1.5 \
   --repo Unknown122-coder/vexpath
 ```
 

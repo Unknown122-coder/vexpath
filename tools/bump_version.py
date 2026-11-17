@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +47,15 @@ SIBLINGS = ("vexpath-core", "vexpath-platform", "vexpath-db")
 #: At the repository root, because GitHub lists an action only from
 #: there. The README, tests and notes stay in apps/action/.
 ACTION = ROOT / "action.yml"
+
+#: The README's status block names the version somebody reading the repository
+#: will install, and nothing owned it: it still said 0.1.1 four releases after
+#: 0.1.1, which is the first thing a visitor reads and the last thing anybody
+#: thinks to edit. Owned here now, with the date, because a status line is
+#: only a status if something keeps it true.
+README = ROOT / "README.md"
+README_VERSION = re.compile(r"`vexpath` \d+\.\d+\.\d+\S* on PyPI")
+README_DATE = re.compile(r"(\*\*released and deployed\*\* \()\d{4}-\d{2}-\d{2}(\))")
 
 #: PEP 440, loosely: enough to refuse a typo without reimplementing the spec.
 #: A bad version reaches PyPI as a different release than the one intended,
@@ -80,6 +90,18 @@ def bump(version: str) -> list[str]:
     if updated != action:
         ACTION.write_text(updated, encoding="utf-8")
         changed.append(str(ACTION.relative_to(ROOT)))
+
+    readme = README.read_text(encoding="utf-8")
+    updated = README_VERSION.sub(f"`vexpath` {version} on PyPI", readme, count=1)
+    # The date a release is cut is the date this runs, which is why it is read
+    # from the clock rather than passed in: a releaser who has to supply it is
+    # a releaser who can get it wrong.
+    updated = README_DATE.sub(
+        rf"\g<1>{datetime.now(UTC).date().isoformat()}\g<2>", updated, count=1
+    )
+    if updated != readme:
+        README.write_text(updated, encoding="utf-8")
+        changed.append(str(README.relative_to(ROOT)))
 
     if _regenerate_openapi():
         changed.append("apps/api/openapi.json")
@@ -190,6 +212,13 @@ def verify(version: str) -> list[str]:
     schema = json.loads((ROOT / "apps" / "api" / "openapi.json").read_text(encoding="utf-8"))
     if schema["info"]["version"] != version:
         problems.append(f"the OpenAPI document says {schema['info']['version']}")
+
+    readme = README.read_text(encoding="utf-8")
+    stated = README_VERSION.search(readme)
+    if stated is None:
+        problems.append("the README status names no version")
+    elif stated.group(0) != f"`vexpath` {version} on PyPI":
+        problems.append(f"the README status says {stated.group(0)}")
 
     return problems
 
