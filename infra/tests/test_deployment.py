@@ -25,6 +25,8 @@ from vexpath_platform.settings import Environment, Settings
 
 INFRA = Path(__file__).resolve().parents[1]
 FLY = INFRA / "fly.toml"
+#: At the repository root, because that is where Render looks by default.
+RENDER = INFRA.parent / "render.yaml"
 DOCKERFILE = INFRA / "Dockerfile"
 COMPOSE = INFRA / "docker-compose.yml"
 
@@ -141,7 +143,7 @@ def test_only_one_machine_runs_until_the_limiter_is_shared(
 
 
 def test_no_deployment_file_carries_a_secret() -> None:
-    for path in (FLY, DOCKERFILE, COMPOSE):
+    for path in (FLY, DOCKERFILE, COMPOSE, RENDER):
         text = path.read_text(encoding="utf-8")
         for shape in SECRET_SHAPES:
             if shape in ("postgres://", "postgresql://") and path is COMPOSE:
@@ -462,3 +464,149 @@ def test_every_worker_command_in_the_runbook_exists(runbook: str) -> None:
             assert flag in known[subcommand], (
                 f"the runbook passes {flag} to {subcommand}, which does not accept it"
             )
+
+
+# --- Render, which is where this actually runs now -------------------------
+#
+# Fly's trial ended and suspended the app, which took the hosted platform and
+# the README's own badge down with it. These tests cover the things that are
+# only visible after a deploy, plus the two that differ from Fly and so are
+# easy to carry over wrongly: there is no release command on the free plan, and
+# an image service does not redeploy itself.
+
+
+@pytest.fixture(scope="module")
+def render() -> dict[str, Any]:
+    import yaml
+
+    document: dict[str, Any] = yaml.safe_load(RENDER.read_text(encoding="utf-8"))
+    return document
+
+
+@pytest.fixture(scope="module")
+def render_service(render: dict[str, Any]) -> dict[str, Any]:
+    services = render["services"]
+    assert len(services) == 1, "one image, one process type (ADR-0011)"
+    service: dict[str, Any] = services[0]
+    return service
+
+
+def _render_env(service: dict[str, Any]) -> dict[str, Any]:
+    return {entry["key"]: entry for entry in service["envVars"]}
+
+
+def test_the_blueprint_sits_where_render_looks_for_it() -> None:
+    assert RENDER.is_file()
+    assert RENDER.parent == INFRA.parent
+
+
+def test_the_service_is_next_to_the_database(render_service: dict[str, Any]) -> None:
+    """Several database round trips per page make the region load-bearing.
+
+    Oregon is Render's default and would add roughly a fifth of a second to
+    each of them, on a plan that already has a tenth of a CPU to render with.
+    """
+    assert render_service["region"] == "singapore"
+
+
+def test_the_base_url_is_https(render_service: dict[str, Any]) -> None:
+    """The one misconfiguration that serves every page and signs nobody in.
+
+    The session cookie is Secure, so over plain http a browser accepts it and
+    never sends it back: sign-in fails on every attempt with nothing in any
+    log to explain it. Production refuses to start rather than do that, and
+    this is the configuration that would trip it.
+    """
+    base = _render_env(render_service)["VEXPATH_BASE_URL"]["value"]
+
+    assert base.startswith("https://")
+    assert render_service["name"] in base, "the hostname follows the service name"
+
+
+def test_the_render_deployment_declares_production(render_service: dict[str, Any]) -> None:
+    env = _render_env(render_service)
+
+    assert env["VEXPATH_ENV"]["value"] == "production"
+    assert env["VEXPATH_TRUST_PROXY_HEADERS"]["value"] == "true"
+    assert env["VEXPATH_RATE_LIMIT_ENABLED"]["value"] == "true"
+
+
+def test_the_port_is_declared_because_the_image_hardcodes_one(
+    render_service: dict[str, Any],
+) -> None:
+    """The image's CMD binds 8000, so Render is told rather than left to guess."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    declared = str(_render_env(render_service)["PORT"]["value"])
+
+    assert f'"--port", "{declared}"' in dockerfile
+
+
+def test_traffic_is_gated_on_readiness(render_service: dict[str, Any]) -> None:
+    """Readiness, so a release that cannot reach Neon never takes over.
+
+    /readyz answers 503 while the database is unreachable; /healthz is
+    deliberately independent of it, which is why it is the container's own
+    liveness probe and not this.
+    """
+    assert render_service["healthCheckPath"] == "/readyz"
+    assert "/healthz" in DOCKERFILE.read_text(encoding="utf-8")
+
+
+def test_the_secret_key_is_generated_rather_than_pasted(
+    render_service: dict[str, Any],
+) -> None:
+    """It signs sessions and encrypts stored webhook secrets.
+
+    Rotating it logs everybody out and makes those secrets unreadable, so the
+    fewer places it exists the better: generated where it is used, never
+    copied from anywhere it might also be sitting.
+    """
+    assert _render_env(render_service)["VEXPATH_SECRET_KEY"]["generateValue"] is True
+
+
+def test_the_database_url_is_asked_for_rather_than_committed(
+    render_service: dict[str, Any],
+) -> None:
+    assert _render_env(render_service)["VEXPATH_DATABASE_URL"]["sync"] is False
+
+
+def test_the_blueprint_mounts_no_disk(render_service: dict[str, Any]) -> None:
+    """Carrying Fly's volume over would be paying for nothing.
+
+    The Fly deployment mounts one for the advisory snapshot and the call-graph
+    cache. Nothing in apps/api reads either: the corpus the package pages
+    serve lives in Postgres.
+    """
+    assert "disk" not in render_service
+
+    api = INFRA.parent / "apps" / "api" / "src"
+    for source in api.rglob("*.py"):
+        text = source.read_text(encoding="utf-8")
+        assert "/data" not in text, f"{source.name} reads the volume after all"
+
+
+def test_the_pinned_image_is_the_released_one(render_service: dict[str, Any]) -> None:
+    """An image service does not auto-deploy, so the tag is the whole story.
+
+    A blueprint still pointing at an old tag is a hosted platform running
+    code nobody is looking at any more. `tools/bump_version.py` owns this and
+    its `verify` reads it back.
+    """
+    import tomllib
+
+    version = tomllib.loads(
+        (INFRA.parent / "packages" / "cli" / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+
+    assert render_service["image"]["url"].endswith(f":{version}")
+
+
+def test_the_runbook_says_migrations_are_a_manual_step_here(runbook: str) -> None:
+    """Fly ran them as a release command; the free plan has no such thing.
+
+    This is the one real downgrade in the move, so it is written down rather
+    than left to be rediscovered by a deploy that serves a schema it does not
+    have.
+    """
+    assert "preDeployCommand" in runbook
+    assert "alembic -c infra/alembic.ini upgrade head" in runbook

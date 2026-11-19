@@ -48,6 +48,14 @@ SIBLINGS = ("vexpath-core", "vexpath-platform", "vexpath-db")
 #: there. The README, tests and notes stay in apps/action/.
 ACTION = ROOT / "action.yml"
 
+#: The Render blueprint pins the published image by tag, because an image
+#: service does not auto-deploy: a release nobody repins is a release the
+#: hosted platform never runs. Owned here for the same reason as everything
+#: else in this file -- a version in a place nobody updates is worse than no
+#: version, since it looks current.
+RENDER = ROOT / "render.yaml"
+RENDER_IMAGE = re.compile(r"(url: ghcr\.io/unknown122-coder/vexpath:)\S+")
+
 #: The README's status block names the version somebody reading the repository
 #: will install, and nothing owned it: it still said 0.1.1 four releases after
 #: 0.1.1, which is the first thing a visitor reads and the last thing anybody
@@ -90,6 +98,12 @@ def bump(version: str) -> list[str]:
     if updated != action:
         ACTION.write_text(updated, encoding="utf-8")
         changed.append(str(ACTION.relative_to(ROOT)))
+
+    blueprint = RENDER.read_text(encoding="utf-8")
+    repinned = RENDER_IMAGE.sub(rf"\g<1>{version}", blueprint, count=1)
+    if repinned != blueprint:
+        RENDER.write_text(repinned, encoding="utf-8")
+        changed.append(str(RENDER.relative_to(ROOT)))
 
     readme = README.read_text(encoding="utf-8")
     updated = README_VERSION.sub(f"`vexpath` {version} on PyPI", readme, count=1)
@@ -212,6 +226,12 @@ def verify(version: str) -> list[str]:
     schema = json.loads((ROOT / "apps" / "api" / "openapi.json").read_text(encoding="utf-8"))
     if schema["info"]["version"] != version:
         problems.append(f"the OpenAPI document says {schema['info']['version']}")
+
+    pinned = RENDER_IMAGE.search(RENDER.read_text(encoding="utf-8"))
+    if pinned is None:
+        problems.append("the Render blueprint pins no image")
+    elif not pinned.group(0).endswith(f":{version}"):
+        problems.append(f"the Render blueprint pins {pinned.group(0).rsplit(':', 1)[-1]}")
 
     readme = README.read_text(encoding="utf-8")
     stated = README_VERSION.search(readme)
