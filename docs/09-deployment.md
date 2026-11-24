@@ -128,9 +128,30 @@ in a time you can feel, and that is the price of not having a card.
 
 ### Redeploying after a release
 
-An image service does not auto-deploy. `tools/bump_version.py` repins the tag
-in `render.yaml` as part of cutting a release, so a Blueprint sync picks it up;
-`verify` refuses a release whose blueprint still points at the old image.
+An image service does not auto-deploy on a new tag. `tools/bump_version.py`
+repins it in `render.yaml` as part of cutting a release, and `verify` refuses a
+release whose blueprint still points at the old image, so the repository always
+states which image should be running.
+
+**"Deploy latest reference" does not pick up a new tag.** It redeploys the
+*same* reference the service already stores -- that is what the name means --
+so after a release it reinstalls the image the service is already running.
+Confirmed the slow way on 0.1.6, which stayed on 0.1.5 through one of those.
+What applies a repinned tag is a **Blueprint sync**: Render re-reads
+`render.yaml`, and by default it does that automatically on every push to the
+linked branch that modifies the file. If the service is still on the old
+version a few minutes after a release:
+
+1. **Blueprint page** -- has it synced the latest commit? With Auto Sync off,
+   there is a **Manual sync** button there.
+2. **Service -> Events** -- is there a deploy that failed, or none at all?
+
+To stop doing this by hand, create a **deploy hook** for the service and call
+it from the release workflow; for an image-backed service the hook takes the
+image to deploy, so a release would deploy itself. That needs the hook URL in
+the repository secrets, which is a one-time dashboard step nobody has done
+yet.
+
 Migrations, again, are the manual half.
 
 ## First deploy
