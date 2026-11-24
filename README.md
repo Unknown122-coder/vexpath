@@ -18,8 +18,8 @@ An open platform that turns a Software Bill of Materials (SBOM) into an honest a
 
 It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches every component against public advisory databases, then performs **reachability analysis**: it builds a call graph of the user's code and its dependencies, extracts the exact functions that each advisory's fix commit touched, and checks whether those functions are reachable from the application's entry points. The result is published as a signed **OpenVEX** document and an **in-toto attestation**, enforced in CI by a **policy engine**, and surfaced on a hosted web platform with public report pages, per-package vulnerability pages and a README badge.
 
-> Status: **released and deployed** (2026-11-15).
-> [`vexpath` 0.1.5 on PyPI](https://pypi.org/project/vexpath/), the platform
+> Status: **released and deployed** (2026-11-24).
+> [`vexpath` 0.1.6 on PyPI](https://pypi.org/project/vexpath/), the platform
 > live at [vexpath.onrender.com](https://vexpath.onrender.com) with an advisory corpus of
 > 19,579 advisories and 27,877 vulnerable symbols across 805 packages. The
 > scanner reads
