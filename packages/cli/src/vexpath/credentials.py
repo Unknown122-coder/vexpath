@@ -41,7 +41,14 @@ URL_ENVIRONMENT_VARIABLE = "VEXPATH_API_URL"
 #: failed with a DNS error naming a domain the user had never heard of. A
 #: default that points nowhere is worse than no default, because it fails
 #: later and somewhere else.
-DEFAULT_API_URL = "https://vexpath.fly.dev"
+#:
+#: Then it pointed at ``vexpath.fly.dev`` until 2026-11-24, and the same
+#: sentence came true a second way: the host did not stop existing, its trial
+#: ended. The TLS handshake failed rather than DNS, which is a worse error to
+#: receive -- and because this value ships inside the wheel, every install
+#: already out there kept using it. Changing it here only reaches somebody
+#: who upgrades, which is the real cost of a default naming a host at all.
+DEFAULT_API_URL = "https://vexpath.onrender.com"
 
 #: Overrides the whole configuration directory, which is what a test needs and
 #: what a container with a read-only home directory needs too.

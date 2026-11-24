@@ -1409,9 +1409,9 @@ that says what this does badly.
   Its `action.yml` had to move to the repository root, which is the only place
   GitHub lists one from, and its description had to fit 125 characters.
 - The badge in the README, pointing at
-  [this repository's own report](https://vexpath.fly.dev/p/unknown122-coder/vexpath).
+  [this repository's own report](https://vexpath.onrender.com/p/unknown122-coder/vexpath).
   It says *none reachable* rather than *passing*.
-- The platform deployed at [vexpath.fly.dev](https://vexpath.fly.dev).
+- The platform deployed at [vexpath.onrender.com](https://vexpath.onrender.com), after the Fly trial ended.
 
 ### Still open
 

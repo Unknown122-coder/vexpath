@@ -1,6 +1,6 @@
 # vexpath
 
-[![reachable](https://vexpath.fly.dev/badge/unknown122-coder/vexpath.svg)](https://vexpath.fly.dev/p/unknown122-coder/vexpath)
+[![reachable](https://vexpath.onrender.com/badge/unknown122-coder/vexpath.svg)](https://vexpath.onrender.com/p/unknown122-coder/vexpath)
 [![PyPI](https://img.shields.io/pypi/v/vexpath)](https://pypi.org/project/vexpath/)
 [![CI](https://github.com/Unknown122-coder/vexpath/actions/workflows/ci.yml/badge.svg)](https://github.com/Unknown122-coder/vexpath/actions/workflows/ci.yml)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -15,7 +15,7 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 
 > Status: **released and deployed** (2026-11-15).
 > [`vexpath` 0.1.5 on PyPI](https://pypi.org/project/vexpath/), the platform
-> live at [vexpath.fly.dev](https://vexpath.fly.dev) with an advisory corpus of
+> live at [vexpath.onrender.com](https://vexpath.onrender.com) with an advisory corpus of
 > 19,579 advisories and 27,877 vulnerable symbols across 805 packages. The
 > scanner reads
 > seven lockfile formats and both SBOM standards, matches against a
