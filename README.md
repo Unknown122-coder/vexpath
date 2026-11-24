@@ -1,6 +1,6 @@
 # vexpath
 
-[![reachable](https://vexpath.onrender.com/badge/unknown122-coder/vexpath.svg)](https://vexpath.onrender.com/p/unknown122-coder/vexpath)
+[![reachable](docs/badge.svg)](https://vexpath.onrender.com/p/unknown122-coder/vexpath)
 [![PyPI](https://img.shields.io/pypi/v/vexpath)](https://pypi.org/project/vexpath/)
 [![CI](https://github.com/Unknown122-coder/vexpath/actions/workflows/ci.yml/badge.svg)](https://github.com/Unknown122-coder/vexpath/actions/workflows/ci.yml)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -8,6 +8,11 @@
 The first badge is this project scanning itself, and it links to the report
 behind it. It says *none reachable* rather than *passing*, because a count of
 findings nobody can reach is the only number worth putting on a README.
+
+It is a committed file, rendered each week by this repository's own CI from a
+scan against the published advisory corpus — not a request to the platform.
+A badge served by a host that sleeps is a broken image at the top of the page
+for whoever arrives first, and this one is about trustworthy reporting.
 
 An open platform that turns a Software Bill of Materials (SBOM) into an honest answer to one question: **of all the known vulnerabilities in my dependencies, which ones can actually hurt me?**
 

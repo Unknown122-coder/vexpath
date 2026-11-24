@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from vexpath_api.auth import PublicConnection
 from vexpath_api.templating import render
+from vexpath_core import badge as badge_svg
 from vexpath_core.enums import Verdict
 from vexpath_db.tables import (
     advisories,
@@ -47,15 +48,6 @@ from vexpath_db.tables import (
 )
 
 router = APIRouter(tags=["public"])
-
-#: Badge colours, in the shields.io palette so a published badge looks like
-#: every other badge in a README rather than like something bespoke.
-_COLOURS = {
-    "reachable": "critical",
-    "investigating": "important",
-    "clear": "success",
-    "unknown": "inactive",
-}
 
 #: How long a badge may be cached. Short, because the acceptance criterion is
 #: that it reflects a new scan within five minutes, and a badge that lags
@@ -127,7 +119,7 @@ async def badge(
     scan = await _latest_scan(connection, project["id"])
 
     label, state = _badge_state(scan)
-    svg = _render_badge("reachable", label, _COLOURS[state])
+    svg = badge_svg.render_state(label, state)
     return Response(
         content=svg,
         media_type="image/svg+xml",
@@ -140,84 +132,22 @@ async def badge(
 
 
 def _badge_state(scan: Any) -> tuple[str, str]:
-    """What the badge says, and in what colour.
+    """Read the counts off a scan row and let core decide what they mean.
 
-    Deliberately pessimistic where the answer is not known. A badge is the most
-    widely copied thing a project publishes, so one that says "clear" when the
-    analysis could not decide would be the single most misleading artefact this
-    system could produce.
+    The rules themselves live in :mod:`vexpath_core.badge`, because this
+    repository's CI also renders a badge -- to a committed file, so the README
+    does not depend on a host that sleeps -- and two badges disagreeing about
+    the same scan would be worse than either being wrong alone.
     """
     if scan is None:
-        return "no scan", "unknown"
+        return badge_svg.state_for(reachable=0, investigating=0, reproducible=False, scanned=False)
 
     summary = scan["summary"] or {}
-    reachable = int(summary.get("reachable") or 0)
     by_verdict = summary.get("by_verdict") or {}
-    investigating = int(by_verdict.get(Verdict.UNDER_INVESTIGATION.value) or 0)
-
-    if reachable:
-        return f"{reachable} reachable", "reachable"
-    if investigating:
-        return f"{investigating} unknown", "investigating"
-    if not scan["advisory_snapshot_id"]:
-        # The verdicts cannot be re-derived, so "none reachable" is an
-        # assertion rather than a finding.
-        return "none reachable (unverified)", "investigating"
-    return "none reachable", "clear"
-
-
-def _render_badge(label: str, message: str, colour: str) -> str:
-    """A self-contained SVG, with no external reference of any kind.
-
-    No font file, no stylesheet, no image. A badge that fetched anything would
-    report every page view back to wherever it fetched from, and a badge in a
-    README is viewed by everyone who looks at the repository.
-    """
-    palette = {
-        "critical": "#e05d44",
-        "important": "#dfb317",
-        "success": "#4c1",
-        "inactive": "#9f9f9f",
-    }
-    fill = palette.get(colour, palette["inactive"])
-    label_width = 8 + 7 * len(label)
-    message_width = 10 + 7 * len(message)
-    total = label_width + message_width
-
-    # Escaped by hand because this is not a template: the values come from a
-    # project slug and a scan summary, and an unescaped angle bracket here
-    # would be script injection into every page that embeds the badge.
-    safe_label = _escape(label)
-    safe_message = _escape(message)
-
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20" '
-        f'role="img" aria-label="{safe_label}: {safe_message}">'
-        f"<title>{safe_label}: {safe_message}</title>"
-        f'<g shape-rendering="crispEdges">'
-        f'<rect width="{label_width}" height="20" fill="#555"/>'
-        f'<rect x="{label_width}" width="{message_width}" height="20" fill="{fill}"/>'
-        f"</g>"
-        f'<g fill="#fff" text-anchor="middle" '
-        f'font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">'
-        f'<text x="{label_width / 2}" y="14">{safe_label}</text>'
-        f'<text x="{label_width + message_width / 2}" y="14">{safe_message}</text>'
-        f"</g></svg>"
-    )
-
-
-def _escape(value: str) -> str:
-    """Escape for XML text and attribute content.
-
-    Written out rather than imported so the set is visible: these five are the
-    ones that matter inside both a text node and a double-quoted attribute.
-    """
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
+    return badge_svg.state_for(
+        reachable=int(summary.get("reachable") or 0),
+        investigating=int(by_verdict.get(Verdict.UNDER_INVESTIGATION.value) or 0),
+        reproducible=bool(scan["advisory_snapshot_id"]),
     )
 
 

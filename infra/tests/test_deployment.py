@@ -610,3 +610,77 @@ def test_the_runbook_says_migrations_are_a_manual_step_here(runbook: str) -> Non
     """
     assert "preDeployCommand" in runbook
     assert "alembic -c infra/alembic.ini upgrade head" in runbook
+
+
+# --- The badge, which must not depend on a host that sleeps ----------------
+
+BADGE = INFRA.parent / "docs" / "badge.svg"
+SELF_SCAN_WORKFLOW = INFRA.parent / ".github" / "workflows" / "vexpath.yml"
+
+
+@pytest.fixture(scope="module")
+def self_scan() -> dict[str, Any]:
+    import yaml
+
+    document: dict[str, Any] = yaml.safe_load(SELF_SCAN_WORKFLOW.read_text(encoding="utf-8"))
+    return document
+
+
+def test_the_readme_badge_is_a_file_not_a_request_to_the_platform() -> None:
+    """The platform is on a free plan that spins down after fifteen minutes.
+
+    It takes up to a minute to wake and GitHub's image proxy gives up long
+    before that, so a badge fetched from it is a broken image at the top of
+    the page for whoever arrives first. The link beside it may still point at
+    the live report -- a slow page is a cost the reader chose to pay.
+    """
+    readme = (INFRA.parent / "README.md").read_text(encoding="utf-8")
+
+    assert "[![reachable](docs/badge.svg)]" in readme
+    assert "onrender.com/badge" not in readme
+    assert "fly.dev/badge" not in readme
+
+
+def test_the_committed_badge_exists_and_reaches_for_nothing() -> None:
+    svg = BADGE.read_text(encoding="utf-8")
+    body = svg.replace('xmlns="http://www.w3.org/2000/svg"', "")
+
+    assert "http" not in body
+    assert "<script" not in body
+
+
+def test_the_badge_is_rendered_only_from_a_real_corpus(self_scan: dict[str, Any]) -> None:
+    """The invariant that keeps the badge honest.
+
+    A push scans against the frozen test snapshot, which holds a handful of
+    advisories for the fixture repositories and knows nothing about this
+    project's dependencies. Rendering the badge from that run would publish a
+    green "none reachable" on no evidence at all -- the single most misleading
+    thing this project could put at the top of its README.
+    """
+    steps = self_scan["jobs"]["scan"]["steps"]
+    render = next(step for step in steps if step.get("name", "").startswith("Keep the committed"))
+    condition = render["if"]
+
+    assert "schedule" in condition
+    assert "refs/heads/main" in condition
+    # A push must not reach it.
+    assert "github.event_name == 'push'" not in condition
+
+    corpus = next(step for step in steps if step.get("name") == "Fetch the published corpus")
+    assert "advisory pull" in corpus["run"]
+    assert "schedule" in corpus["if"]
+
+
+def test_the_scan_that_feeds_the_badge_names_its_corpus(self_scan: dict[str, Any]) -> None:
+    """Otherwise the badge can only ever say "unverified".
+
+    "None reachable" is allowed only when the verdicts can be re-derived,
+    which means the scan recorded which corpus produced them. A live query
+    cannot be re-derived, so the scheduled run pulls the published corpus and
+    points the scan at it.
+    """
+    steps = self_scan["jobs"]["scan"]["steps"]
+    scan = next(step for step in steps if step.get("id") == "vexpath")
+
+    assert "var/corpus" in scan["with"]["snapshot"]
