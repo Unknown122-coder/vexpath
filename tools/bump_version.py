@@ -48,6 +48,22 @@ SIBLINGS = ("vexpath-core", "vexpath-platform", "vexpath-db")
 #: there. The README, tests and notes stay in apps/action/.
 ACTION = ROOT / "action.yml"
 
+#: The verification guide gives commands somebody runs verbatim, and every
+#: one of them names a version: the wheel, the tag, the image. They pointed at
+#: 0.1.0 until 2026-11-24, whose image carries no attestation at all -- the
+#: repository was private then -- so a reader following the guide saw a failure
+#: that looked like ours. Owned here so the commands always describe the
+#: release they are published alongside.
+GUIDE = ROOT / "docs" / "guide" / "verifying-attestations.md"
+
+
+def _current_version() -> str:
+    """The version in the manifests, before anything rewrites them."""
+    manifest = tomllib.loads((ROOT / "packages" / "cli" / "pyproject.toml").read_text("utf-8"))
+    version: str = manifest["project"]["version"]
+    return version
+
+
 #: The Render blueprint pins the published image by tag, because an image
 #: service does not auto-deploy: a release nobody repins is a release the
 #: hosted platform never runs. Owned here for the same reason as everything
@@ -73,6 +89,7 @@ VERSION = re.compile(r"^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+|\.dev\d+|\.post\d+)?$")
 
 def bump(version: str) -> list[str]:
     changed: list[str] = []
+    previous = _current_version()
 
     for manifest in MANIFESTS:
         text = manifest.read_text(encoding="utf-8")
@@ -98,6 +115,16 @@ def bump(version: str) -> list[str]:
     if updated != action:
         ACTION.write_text(updated, encoding="utf-8")
         changed.append(str(ACTION.relative_to(ROOT)))
+
+    # Every command in the guide names a version, so the whole of the old one
+    # is replaced rather than a pattern per command: the alternative is a
+    # regex for each of the wheel, the tag, the image and the pip install,
+    # and the one that gets forgotten is the one somebody runs.
+    guide = GUIDE.read_text(encoding="utf-8")
+    rewritten = guide.replace(previous, version)
+    if rewritten != guide:
+        GUIDE.write_text(rewritten, encoding="utf-8")
+        changed.append(str(GUIDE.relative_to(ROOT)))
 
     blueprint = RENDER.read_text(encoding="utf-8")
     repinned = RENDER_IMAGE.sub(rf"\g<1>{version}", blueprint, count=1)
@@ -226,6 +253,12 @@ def verify(version: str) -> list[str]:
     schema = json.loads((ROOT / "apps" / "api" / "openapi.json").read_text(encoding="utf-8"))
     if schema["info"]["version"] != version:
         problems.append(f"the OpenAPI document says {schema['info']['version']}")
+
+    guide = GUIDE.read_text(encoding="utf-8")
+    if f"vexpath-{version}-py3-none-any.whl" not in guide:
+        problems.append("the verification guide names a different wheel")
+    if f"--source-tag v{version}" not in guide:
+        problems.append("the verification guide verifies a different tag")
 
     pinned = RENDER_IMAGE.search(RENDER.read_text(encoding="utf-8"))
     if pinned is None:
