@@ -80,6 +80,26 @@ services:
       - key: VEXPATH_DATABASE_URL
         sync: false
 
+      # Sign-in. Without both of these the application starts and serves every
+      # public page -- reports, package pages, the badge -- and the sign-in
+      # screen says it is not configured, which is what this deployment did
+      # until an OAuth app existed for this hostname.
+      #
+      # The OAuth app's callback must be exactly
+      # https://vexpath.onrender.com/auth/github/callback, because the
+      # callback URL is sent with the code exchange and GitHub compares it to
+      # the registered one. A mismatch fails at the exchange, after the user
+      # has already approved, which is the least debuggable place for it.
+      #
+      # Scopes are requested by the application, not configured here:
+      # read:user and user:email, and nothing that can read a repository. A
+      # sign-in token that could read private code would be a liability to
+      # hold.
+      - key: VEXPATH_GITHUB_CLIENT_ID
+        sync: false
+      - key: VEXPATH_GITHUB_CLIENT_SECRET
+        sync: false
+
 # Deliberately absent, and each for a reason:
 #
 # - No disk. The Fly deployment mounts one for the advisory snapshot and the
@@ -92,11 +112,6 @@ services:
 #   that adds one -- docs/09-deployment.md has the command. That is a real
 #   downgrade from Fly's release_command, where a failed migration stopped the
 #   deploy, so it is written down rather than remembered.
-#
-# - No GITHUB_CLIENT_ID/SECRET. They are optional: without them sign-in is
-#   simply unavailable and every public page -- reports, package pages, the
-#   badge -- works as it does now. Add them in the dashboard once an OAuth app
-#   exists for this hostname.
 #
 # - No autoDeploy. It has no effect on a prebuilt image: a new release is
 #   picked up by bumping the pinned tag above, or by "Deploy latest reference"
