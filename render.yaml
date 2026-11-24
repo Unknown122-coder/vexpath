@@ -24,7 +24,7 @@ services:
     # compressed, so a cold pull is not the slow part.
     runtime: image
     image:
-      url: ghcr.io/unknown122-coder/vexpath:0.1.6
+      url: ghcr.io/unknown122-coder/vexpath:0.1.7
     # Next to the database, not next to the author. Every page makes several
     # round trips to Postgres -- authentication, the tenant context, the
     # query -- and the Neon project is in ap-southeast-1, so this is

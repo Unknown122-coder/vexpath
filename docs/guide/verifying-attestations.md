@@ -15,20 +15,20 @@ your SBOM or your VEX document. This is what a reviewer does with it.
 # Two files from two places: the wheel is on PyPI, the provenance is an asset
 # of the GitHub release. One provenance file covers every artifact of a
 # release, which is why it is not named after any one of them.
-pip download vexpath==0.1.6 --no-deps -d .
-gh release download v0.1.6 --repo Unknown122-coder/vexpath -p multiple.intoto.jsonl
+pip download vexpath==0.1.7 --no-deps -d .
+gh release download v0.1.7 --repo Unknown122-coder/vexpath -p multiple.intoto.jsonl
 
-slsa-verifier verify-artifact vexpath-0.1.6-py3-none-any.whl \
+slsa-verifier verify-artifact vexpath-0.1.7-py3-none-any.whl \
   --provenance-path multiple.intoto.jsonl \
   --source-uri github.com/Unknown122-coder/vexpath \
-  --source-tag v0.1.6
+  --source-tag v0.1.7
 
 # The container image. Needs no login: the package is public. Worth knowing if
 # you fork this, because a GHCR package is private by default even when its
 # repository is public, and making the repository public does not change it --
 # so `docker pull` and this command both fail with an authorization error
 # until the package's own visibility is changed.
-gh attestation verify oci://ghcr.io/unknown122-coder/vexpath:0.1.6 \
+gh attestation verify oci://ghcr.io/unknown122-coder/vexpath:0.1.7 \
   --repo Unknown122-coder/vexpath
 ```
 
