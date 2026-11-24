@@ -10,13 +10,18 @@ M4. Until something enqueues work, a worker loop would have nothing to consume.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from vexpath_core import __version__ as core_version
 from vexpath_core.advisory.sync import DEFAULT_ECOSYSTEMS, AdvisorySyncError
-from vexpath_core.snapshot import SnapshotIntegrityError
+from vexpath_core.corpus import merge
+from vexpath_core.ids import new_ulid
+from vexpath_core.models.advisory import AdvisorySnapshot
+from vexpath_core.snapshot import SnapshotIntegrityError, read_snapshot, write_snapshot
 from vexpath_db.engine import create_sync_engine
 from vexpath_platform.logging import configure_logging, get_logger
 from vexpath_platform.settings import get_settings
@@ -30,6 +35,12 @@ from vexpath_worker.jobs.extract_symbols import (
 )
 from vexpath_worker.jobs.seed_advisories import seed_snapshot
 from vexpath_worker.jobs.sync_advisories import refresh_advisories
+
+#: How far symbol coverage may fall across a refresh before it is
+#: refused. Not zero tolerance: advisories get withdrawn and upstream
+#: repositories get renamed, and each legitimately drops symbols. A
+#: tenth is far more than either explains and far less than a wipe.
+SYMBOL_FLOOR = 0.9
 
 log = get_logger(__name__)
 
@@ -233,6 +244,95 @@ def extract_symbols_command(
 
     for advisory_id, reason in sorted(report.problems.items())[:10]:
         typer.secho(f"{advisory_id}: {reason}", fg=typer.colors.YELLOW, err=True)
+
+
+@app.command("refresh-corpus")
+def refresh_corpus_command(
+    previous: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            help="The corpus being replaced: the published one, with its symbols.",
+        ),
+    ],
+    directory: Annotated[
+        Path,
+        typer.Argument(help="Where to write the merged corpus."),
+    ] = Path("var/refreshed"),
+    ecosystems: Annotated[
+        str,
+        typer.Option("--ecosystem", "-e", help="Comma-separated OSV ecosystem names."),
+    ] = "PyPI",
+) -> None:
+    """Download fresh advisories and keep the symbols already extracted.
+
+    The step that lets a corpus refresh itself. Advisories go stale -- a
+    vulnerability disclosed today is invisible until the corpus is rebuilt --
+    but a naive rebuild is far worse than a stale corpus: OSV publishes no
+    vulnerable symbols, and loading a fresh download into the database deletes
+    every one that was extracted. Hours of work gone, and nothing fails. The
+    corpus still parses, still verifies, still publishes, and then decides
+    nothing for everybody who downloads it.
+
+    So this writes a snapshot and never touches the database: fresh advisories
+    from OSV, with the previous corpus's symbols carried onto the advisories
+    that still lack them. :func:`vexpath_core.corpus.merge` holds the rules and
+    the reasons for each.
+
+    What comes out has current advisories and at least the symbol coverage it
+    started with. Seed it, run extraction to fill the new gaps, export, and
+    publish.
+    """
+    settings = get_settings()
+    configure_logging(settings)
+
+    names = [name.strip() for name in ecosystems.split(",") if name.strip()]
+    _, inherited = read_snapshot(previous)
+
+    downloaded_into = directory.parent / f"{directory.name}-downloaded"
+    refresh_advisories(downloaded_into, ecosystems=names or DEFAULT_ECOSYSTEMS)
+    _, downloaded = read_snapshot(downloaded_into)
+
+    merged, merge_report = merge(downloaded, inherited)
+    typer.echo(merge_report.summary_line())
+
+    # Refused rather than written. A corpus with fewer symbols than the one it
+    # replaces is the failure this command exists to prevent, and publishing
+    # one would un-decide findings for every install that downloaded it.
+    # Withdrawals and repository changes can account for a small drop, which is
+    # why this compares totals rather than demanding they never fall.
+    before = sum(len(advisory.symbols) for advisory in inherited)
+    after = sum(len(advisory.symbols) for advisory in merged)
+    if after < before * SYMBOL_FLOOR:
+        typer.secho(
+            f"refusing to write a corpus with {after} symbols where the one it "
+            f"replaces has {before}. Withdrawn advisories and repository changes "
+            f"explain a small drop; this is not small.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    written = write_snapshot(
+        directory,
+        AdvisorySnapshot(
+            id=new_ulid(),
+            created_at=datetime.now(UTC),
+            # Filled in by the writer, which hashes the records it writes.
+            content_sha256="0" * 64,
+            core_version=core_version,
+            ecosystems=names,
+            counts={},
+        ),
+        merged,
+    )
+    with_symbols = sum(1 for advisory in merged if advisory.symbols)
+    typer.echo(
+        f"wrote {directory}: {after} symbols across {with_symbols} advisories, "
+        f"snapshot {written.id}"
+    )
 
 
 @app.command("export-snapshot")

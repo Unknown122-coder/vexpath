@@ -264,6 +264,47 @@ reported that rather than guessing. In a policy that is `!f.reach.conclusive`
 reachable". It is **not** `reach.analysed = false`; that field is true here,
 because the analysis did run.
 
+## Keeping the corpus current
+
+The corpus decays. Advisories arrive daily -- 183 new PyPI records in the
+eleven days after 2026-11-13 -- and a vulnerability disclosed today is
+invisible to every install until somebody rebuilds.
+
+**Rebuilding naively is far worse than leaving it stale.** OSV publishes no
+vulnerable symbols, and `seed-advisories` replaces an advisory's symbols with
+whatever the incoming snapshot holds, deliberately, because ranges and symbols
+are facts the source owns completely. Point that at a fresh download and all
+27,869 extracted symbols are deleted. Nothing fails: the corpus parses,
+verifies, publishes, and then decides nothing for everybody who downloads it.
+
+So the refresh merges before it seeds, over files:
+
+```sh
+# Fresh advisories from OSV, with the previous corpus's symbols carried onto
+# the advisories that still lack them. Never touches the database, and refuses
+# to write a corpus whose symbol coverage collapsed.
+uv run vexpath advisory pull var/published
+uv run python -m vexpath_worker.main refresh-corpus var/published var/refreshed
+
+# Then the ordinary pipeline, which now has gaps only where they are real.
+uv run python -m vexpath_worker.main seed-advisories var/refreshed
+uv run python -m vexpath_worker.main extract-symbols --batch 150 --cache-root var/repo-cache
+uv run python -m vexpath_worker.main export-snapshot var/corpus
+uv run python tools/publish_corpus.py "$(gh release view --json tagName --jq .tagName)" var/corpus
+```
+
+`.github/workflows/corpus-refresh.yml` runs exactly that, daily. It publishes
+over the **newest release's** asset rather than cutting a version, because
+`advisory pull` fetches `releases/latest/download/corpus.*` -- so a refresh
+reaches installs that never upgrade. The client verifies the corpus against its
+own content hash, so replacing an asset cannot smuggle anything past a
+download.
+
+Two things the merge does that are worth knowing: an advisory withdrawn
+upstream is dropped rather than kept for its symbols, and an advisory that now
+names a different repository loses them, because they point at commits it no
+longer claims. `vexpath_core.corpus.merge` has the rest.
+
 ## Shipping a corpus you extracted somewhere else
 
 Symbol extraction takes hours, so it runs where there is time for it -- a

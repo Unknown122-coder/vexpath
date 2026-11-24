@@ -52,6 +52,26 @@ PUBLISHED_ADVISORIES = "corpus.advisories.jsonl.gz"
 REQUIRED_ASSETS = (PUBLISHED_METADATA, PUBLISHED_ADVISORIES)
 
 
+#: Identifier fragments that mark a record as this project's own test data.
+#:
+#: The published corpus held three of them -- CVE-2024-FIXTURE-DYNAMIC,
+#: -NOSYMBOLS and -WITHDRAWN -- because the snapshot was exported from a
+#: database that integration tests had seeded. Harmless in effect, since they
+#: name packages nobody depends on, and still wrong: everybody who ran
+#: `advisory pull` downloaded three advisories this project invented. A fresh
+#: download drops them, and this makes sure they cannot come back.
+FIXTURE_MARKERS = ("FIXTURE", "ZZTEST", "ZZEXPORT", "ZZAPI", "EXAMPLE")
+
+
+def fixture_identifiers(identifiers: Iterable[str]) -> list[str]:
+    """Which identifiers look like this project's test data rather than OSV's."""
+    return sorted(
+        identifier
+        for identifier in identifiers
+        if any(marker in identifier.upper() for marker in FIXTURE_MARKERS)
+    )
+
+
 def missing_assets(present: Iterable[str], required: Sequence[str] = REQUIRED_ASSETS) -> list[str]:
     """Which required assets a release does not hold, in the order required.
 
@@ -80,6 +100,17 @@ def main() -> int:
         f"{len(records)} advisories, {symbols} symbols across {with_symbols} of them, "
         f"snapshot {metadata.id}"
     )
+    fixtures = fixture_identifiers(record.id for record in records)
+    if fixtures:
+        named = ", ".join(fixtures[:5])
+        print(
+            f"refusing to publish a corpus holding {len(fixtures)} test "
+            f"fixture(s) ({named}): every download would carry advisories this "
+            f"project invented. A fresh `refresh-corpus` drops them.",
+            file=sys.stderr,
+        )
+        return 1
+
     if not symbols:
         print(
             "refusing to publish a corpus with no symbols: it would be no better "

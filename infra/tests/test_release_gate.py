@@ -28,6 +28,7 @@ from tools.publish_corpus import (
     PUBLISHED_ADVISORIES,
     PUBLISHED_METADATA,
     REQUIRED_ASSETS,
+    fixture_identifiers,
     missing_assets,
 )
 from vexpath.corpus import DEFAULT_CORPUS_URL
@@ -102,3 +103,96 @@ def test_the_runbook_does_not_still_claim_nothing_refuses_this() -> None:
 
     assert "nothing yet refuses a *release* with no corpus" not in runbook
     assert "draft" in runbook
+
+
+# --- The corpus refreshes itself, and must not lose symbols doing it -------
+
+REFRESH_WORKFLOW = ROOT / ".github" / "workflows" / "corpus-refresh.yml"
+
+
+def _refresh() -> dict[str, Any]:
+    import yaml
+
+    document: dict[str, Any] = yaml.safe_load(REFRESH_WORKFLOW.read_text(encoding="utf-8"))
+    return document
+
+
+def _refresh_steps() -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = _refresh()["jobs"]["refresh"]["steps"]
+    return steps
+
+
+def test_the_refresh_carries_symbols_before_it_seeds_anything() -> None:
+    """The order is the whole safety property.
+
+    Seeding a fresh download deletes every extracted symbol, because an
+    advisory's symbols are a fact the snapshot owns completely and OSV
+    publishes none. So the merge has to happen first, over files: the corpus
+    that reaches the database already has its symbols attached.
+    """
+    names = [step.get("name", "") for step in _refresh_steps()]
+    merge_at = next(i for i, name in enumerate(names) if "carry the symbols" in name)
+    seed_at = next(i for i, name in enumerate(names) if name == "Load the merged corpus")
+
+    assert merge_at < seed_at
+
+
+def test_the_refresh_starts_from_the_published_corpus() -> None:
+    """Not from the repository's test snapshot, which holds fixture advisories.
+
+    The published corpus is the thing whose coverage must not fall, so it is
+    also the thing the merge inherits from.
+    """
+    steps = _refresh_steps()
+    fetch = next(step for step in steps if "corpus being replaced" in step.get("name", ""))
+
+    assert "advisory pull" in fetch["run"]
+
+
+def test_extraction_may_fail_without_costing_the_refresh() -> None:
+    """A vanished upstream or a timed-out fetch is an ordinary outcome.
+
+    The advisories are worth publishing whether or not today's batch of
+    symbol extraction got anywhere, and the queue is resumable, so the next
+    run continues. Failing the job would throw away the fresh advisories over
+    a git fetch.
+    """
+    steps = _refresh_steps()
+    extract = next(step for step in steps if "Extract symbols" in step.get("name", ""))
+
+    assert extract["continue-on-error"] is True
+    assert "--batch" in extract["run"]
+    assert "--cache-root" in extract["run"]
+
+
+def test_the_refresh_publishes_over_the_newest_release() -> None:
+    """Because that is the URL every existing install already fetches.
+
+    `advisory pull` reads releases/latest/download/corpus.*, so a refresh
+    reaches people who never upgrade -- and needs no new version, which is
+    why this is an asset replacement rather than a release.
+    """
+    steps = _refresh_steps()
+    publish = next(step for step in steps if "newest release" in step.get("name", ""))
+
+    assert "gh release view --json tagName" in publish["run"]
+    assert "tools/publish_corpus.py" in publish["run"]
+
+
+def test_the_refresh_can_write_a_release_asset() -> None:
+    job = _refresh()["jobs"]["refresh"]
+
+    assert job["permissions"]["contents"] == "write"
+
+
+def test_a_corpus_holding_test_fixtures_is_refused() -> None:
+    """Three of them shipped to everybody before this existed.
+
+    The snapshot was exported from a database integration tests had seeded,
+    so CVE-2024-FIXTURE-DYNAMIC and two siblings went out in every download.
+    Harmless in effect and still wrong: they are advisories this project
+    invented.
+    """
+    assert fixture_identifiers(["CVE-2026-0001", "GHSA-aaaa-bbbb-cccc"]) == []
+    assert fixture_identifiers(["CVE-2024-FIXTURE-DYNAMIC"]) == ["CVE-2024-FIXTURE-DYNAMIC"]
+    assert fixture_identifiers(["ZZTEST-1", "ZZAPI-2"]) == ["ZZAPI-2", "ZZTEST-1"]

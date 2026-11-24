@@ -1,0 +1,150 @@
+# Keep the published corpus current without losing its symbols.
+#
+# The corpus is the expensive half of this product and the half that decays.
+# Advisories go stale -- a vulnerability disclosed today is invisible to every
+# install until somebody rebuilds -- while the symbols that make a finding
+# decidable take hours of cloning upstream repositories to produce.
+#
+# Rebuilding naively is worse than leaving it stale. OSV publishes no symbols,
+# and seeding a fresh download replaces an advisory's symbols with whatever the
+# snapshot holds, which is none: 27,877 symbols deleted, nothing failing, and a
+# corpus that parses and verifies and decides nothing. `refresh-corpus` exists
+# to make that impossible, and it refuses to write a corpus whose coverage
+# collapsed.
+#
+# What this publishes is an asset on the newest release, because
+# `vexpath advisory pull` fetches releases/latest/download/corpus.* -- so a
+# refresh reaches every existing install without anybody upgrading and without
+# cutting a version. The corpus carries its own content hash, which the client
+# verifies, so replacing the asset cannot smuggle anything past a download.
+
+name: Corpus refresh
+
+on:
+  schedule:
+    # Daily, well away from the advisory-sync probe's six-hourly slot. OSV
+    # publishes continuously; a day is short enough that nothing important ages
+    # out and long enough that extraction makes visible progress between runs.
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      batch:
+        description: How many advisories to attempt extraction for
+        default: "150"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh the corpus and publish it
+    runs-on: ubuntu-latest
+    # Extraction clones real repositories, so this is the one job here that
+    # takes hours rather than minutes. Bounded well under the runner's limit:
+    # the batch size is what actually governs it, and a run that hits this has
+    # something wrong with it.
+    timeout-minutes: 300
+    permissions:
+      # To replace the corpus asset on the newest release.
+      contents: write
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: vexpath
+          POSTGRES_PASSWORD: vexpath
+          POSTGRES_DB: vexpath
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      VEXPATH_DATABASE_URL: postgresql+psycopg://vexpath:vexpath@localhost:5432/vexpath
+      VEXPATH_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install the workspace
+        run: uv sync --all-packages --frozen
+
+      - name: Apply migrations
+        run: uv run alembic -c infra/alembic.ini upgrade head
+
+      - name: Reuse the upstream clones
+        # Extraction's cost is almost entirely git fetches. A warm cache turns
+        # most of them incremental, which is the difference between a batch of
+        # 150 finishing and timing out. Keyed per run so each save is a new
+        # entry, with restore-keys picking up the most recent one.
+        uses: actions/cache@v4
+        with:
+          path: var/repo-cache
+          key: vexpath-upstream-${{ github.run_id }}
+          restore-keys: vexpath-upstream-
+
+      - name: Fetch the corpus being replaced
+        # The published one, with its symbols: the thing whose coverage must
+        # not fall. Not the repository's test snapshot, which holds a handful
+        # of advisories for fixtures.
+        run: uv run vexpath advisory pull var/published
+
+      - name: Download fresh advisories and carry the symbols across
+        id: refresh
+        run: uv run python -m vexpath_worker.main refresh-corpus var/published var/refreshed
+
+      - name: Load the merged corpus
+        run: uv run python -m vexpath_worker.main seed-advisories var/refreshed
+
+      - name: Extract symbols for the advisories that still lack them
+        # Bounded, resumable and allowed to fail: a fetch that times out or an
+        # upstream that has vanished is an ordinary outcome, and it must not
+        # cost the refresh of the advisories themselves. The next run picks the
+        # queue up where this one left it.
+        continue-on-error: true
+        run: >
+          uv run python -m vexpath_worker.main extract-symbols
+          --ecosystem PyPI
+          --batch ${{ github.event.inputs.batch || '150' }}
+          --cache-root var/repo-cache
+
+      - name: Write the corpus back out
+        run: uv run python -m vexpath_worker.main export-snapshot var/corpus
+
+      - name: Publish it over the newest release's asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --json tagName --jq .tagName)"
+          echo "publishing the corpus to ${tag}"
+          uv run python tools/publish_corpus.py "${tag}" var/corpus
+
+      - name: Say what changed
+        if: always()
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          from pathlib import Path
+
+          from vexpath_core.snapshot import read_snapshot
+
+          for name in ("published", "corpus"):
+              directory = Path("var") / name
+              if not (directory / "snapshot.json").is_file():
+                  print(f"{name}: not written")
+                  continue
+              _, records = read_snapshot(directory, verify=False)
+              symbols = sum(len(record.symbols) for record in records)
+              covered = sum(1 for record in records if record.symbols)
+              print(f"{name}: {len(records)} advisories, {symbols} symbols across {covered}")
+          PY
