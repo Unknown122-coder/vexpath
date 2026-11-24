@@ -684,3 +684,100 @@ def test_the_scan_that_feeds_the_badge_names_its_corpus(self_scan: dict[str, Any
     scan = next(step for step in steps if step.get("id") == "vexpath")
 
     assert "var/corpus" in scan["with"]["snapshot"]
+
+
+# --- The deploy hook, which is how a release reaches the platform ----------
+
+
+@pytest.fixture(scope="module")
+def deploy_step(release: dict[str, Any]) -> dict[str, Any]:
+    step: dict[str, Any] = release["jobs"]["deploy-platform"]["steps"][0]
+    return step
+
+
+def test_a_release_deploys_the_image_it_published(release: dict[str, Any]) -> None:
+    """Only on a tag, and never on a dry run.
+
+    A dry run exists to publish nothing; deploying from one would make it the
+    loudest possible thing instead.
+    """
+    job = release["jobs"]["deploy-platform"]
+
+    assert "image" in job["needs"], "the image has to exist before it can be deployed"
+    assert "github.ref_type == 'tag'" in job["if"]
+    assert "!inputs.dry-run" in job["if"]
+
+
+def test_the_deploy_names_the_exact_image_rather_than_a_moving_tag(
+    deploy_step: dict[str, Any],
+) -> None:
+    """The whole point, and the bug it replaces.
+
+    Render's own "Deploy latest reference" redeploys the reference the service
+    already stores, so after a release it reinstalls the image already
+    running. Naming the version explicitly is what makes a release actually
+    arrive.
+    """
+    image = deploy_step["env"]["IMAGE"]
+
+    assert "needs.build.outputs.version" in image
+    assert ":latest" not in image
+    assert "imgURL=${IMAGE}" in deploy_step["run"]
+
+
+def test_the_deployed_image_matches_the_one_the_blueprint_pins(
+    deploy_step: dict[str, Any], render_service: dict[str, Any]
+) -> None:
+    """Render refuses an imgURL from a different repository.
+
+    Its documentation is explicit that everything but the tag or digest must
+    match the service's own image URL, so these two strings are a pair: change
+    the registry or the name in render.yaml alone and every release afterwards
+    would fail at the hook, long after the change looked fine.
+    """
+    pinned = render_service["image"]["url"].rsplit(":", 1)[0]
+    deployed = deploy_step["env"]["IMAGE"].rsplit(":", 1)[0]
+
+    assert deployed == pinned
+
+
+def test_the_hook_url_is_a_secret_and_is_never_echoed(
+    deploy_step: dict[str, Any], release: dict[str, Any]
+) -> None:
+    """It triggers a deploy for anybody holding it.
+
+    Taken from a secret, passed through the environment rather than
+    interpolated into the script -- an expression in a run block is expanded
+    into the shell command, which GitHub prints before running it.
+    """
+    assert deploy_step["env"]["HOOK"] == "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+    workflow = (INFRA.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "api.render.com" not in workflow
+    assert "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" not in deploy_step["run"]
+    assert 'echo "${HOOK}' not in deploy_step["run"]
+
+
+def test_a_missing_secret_does_not_fail_the_release(deploy_step: dict[str, Any]) -> None:
+    """A fork, or this repository before the hook was created.
+
+    The release is the artefacts; the deploy is a courtesy. Failing the one
+    for the other would turn a working release red for a reason that has
+    nothing to do with it.
+    """
+    run = deploy_step["run"]
+
+    assert '-z "${HOOK}"' in run
+    assert "::notice::" in run
+
+
+def test_a_refused_hook_fails_loudly(deploy_step: dict[str, Any]) -> None:
+    """The opposite case, and the reason this is not fire-and-forget.
+
+    A hook that answers 401 and is ignored leaves the platform serving an old
+    version while every log says the release succeeded.
+    """
+    run = deploy_step["run"]
+
+    assert "write-out" in run
+    assert "::error::" in run
+    assert "exit 1" in run

@@ -287,3 +287,60 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  # Tell the hosted platform to run what was just published.
+  #
+  # Without this, picking up a release is a dashboard click, and the click
+  # people reach for is the wrong one: "Deploy latest reference" redeploys the
+  # *same* reference the service already stores, so after a release it
+  # reinstalls the image that is already running. 0.1.6 sat behind 0.1.5 that
+  # way. A Blueprint sync is the right manual answer, and it only happens on a
+  # push that modifies render.yaml -- which a release does, but only if Auto
+  # Sync is on and nothing swallows it.
+  #
+  # The hook removes the guesswork: it names the exact image, so the platform
+  # runs the artefact this release produced rather than whatever the service
+  # last resolved.
+  deploy-platform:
+    # Not publish-core or publish-cli: the platform runs the container, and a
+    # PyPI failure is a reason to look at PyPI, not a reason to leave the
+    # hosted site on an old image.
+    needs: [build, image]
+    if: ${{ github.ref_type == 'tag' && !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy the published image
+        env:
+          # A deploy hook URL is a credential: it triggers a deploy for
+          # anybody who has it. Never echoed, and never interpolated into a
+          # step's script, which would put it in the run log.
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMAGE: ghcr.io/unknown122-coder/vexpath:${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOOK}" ]; then
+            echo "::notice::no RENDER_DEPLOY_HOOK_URL secret is set, so the"\
+                 "platform keeps serving its current image. The release itself"\
+                 "is unaffected."
+            exit 0
+          fi
+
+          # The hook URL already carries its own key parameter, so the image is
+          # appended to that query string rather than starting a new one.
+          case "${HOOK}" in
+            *\?*) separator='&' ;;
+            *) separator='?' ;;
+          esac
+
+          status="$(curl --silent --show-error --location \
+            --output /dev/null --write-out '%{http_code}' \
+            --request POST "${HOOK}${separator}imgURL=${IMAGE}")"
+          echo "the deploy hook answered ${status} for ${IMAGE}"
+
+          # A hook that refuses is worth failing the job for: the release is
+          # already published either way, and a silent refusal is how a
+          # platform ends up serving a version nobody intended.
+          case "${status}" in
+            200|201|202) ;;
+            *) echo "::error::the deploy hook refused the request (${status})"; exit 1 ;;
+          esac

@@ -146,11 +146,28 @@ version a few minutes after a release:
    there is a **Manual sync** button there.
 2. **Service -> Events** -- is there a deploy that failed, or none at all?
 
-To stop doing this by hand, create a **deploy hook** for the service and call
-it from the release workflow; for an image-backed service the hook takes the
-image to deploy, so a release would deploy itself. That needs the hook URL in
-the repository secrets, which is a one-time dashboard step nobody has done
-yet.
+**The release workflow now does it, once the hook exists.** `deploy-platform`
+in `release.yml` calls a Render deploy hook with `imgURL` set to the exact
+image the release just published, so the platform runs that artefact rather
+than whatever the service last resolved. Two one-time steps, both in the
+dashboard:
+
+1. **Service -> Settings -> Deploy -> Deploy Hook**, copy the URL. It is a
+   credential: anybody holding it can trigger a deploy, and Render will
+   regenerate it if it leaks.
+2. Add it to this repository as the secret **`RENDER_DEPLOY_HOOK_URL`**
+   (Settings -> Secrets and variables -> Actions).
+
+Without the secret the job prints a notice and succeeds, because a release is
+its artefacts and the deploy is a courtesy -- failing the one for the other
+would turn a good release red for an unrelated reason. With it, a refused hook
+*does* fail the job: a 401 that nobody notices leaves the platform on an old
+image while every log says the release worked.
+
+Render rejects an `imgURL` whose registry or repository differs from the
+service's own, so the image in `render.yaml` and the one in the workflow are a
+pair. A test compares them, because changing one alone would look fine and
+break every release afterwards at the hook.
 
 Migrations, again, are the manual half.
 
