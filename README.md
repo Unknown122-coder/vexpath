@@ -7,12 +7,11 @@
 
 The first badge is this project scanning itself, and it links to the report
 behind it. It says *none reachable* rather than *passing*, because a count of
-findings nobody can reach is the only number worth putting on a README.
-
-It is a committed file, rendered each week by this repository's own CI from a
-scan against the published advisory corpus — not a request to the platform.
-A badge served by a host that sleeps is a broken image at the top of the page
-for whoever arrives first, and this one is about trustworthy reporting.
+findings nobody can reach is the only number worth putting on a README. It is
+a committed file, rendered each week by this repository's own CI from a scan
+against the published corpus rather than fetched from the platform: a badge
+served by a host that sleeps is a broken image at the top of the page for
+whoever arrives first.
 
 An open platform that turns a Software Bill of Materials (SBOM) into an honest answer to one question: **of all the known vulnerabilities in my dependencies, which ones can actually hurt me?**
 
@@ -20,10 +19,11 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 
 > Status: **released and deployed** (2026-11-24).
 > [`vexpath` 0.1.7 on PyPI](https://pypi.org/project/vexpath/), the platform
-> live at [vexpath.onrender.com](https://vexpath.onrender.com) with an advisory corpus of
-> 19,579 advisories and 27,877 vulnerable symbols across 805 packages. The
-> scanner reads
-> seven lockfile formats and both SBOM standards, matches against a
+> live at [vexpath.onrender.com](https://vexpath.onrender.com), and an advisory
+> corpus of 19,757 advisories with 27,869 vulnerable symbols across 802
+> packages — published with every release, downloaded by `vexpath advisory
+> pull`, and refreshed daily so it does not decay. The scanner reads seven
+> lockfile formats and both SBOM standards, matches against a
 > reproducible advisory corpus, and reports in table, JSON, Markdown and
 > SARIF. Reachability analysis runs as part of `vexpath scan`: it graphs the
 > project and its installed dependencies, searches for each advisory's
@@ -40,9 +40,28 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 > suppressions, webhooks, the policy editor, public report pages and the
 > badge — all server-rendered with **no JavaScript anywhere**, asserted by a
 > Playwright suite that drives the whole interface with script disabled. The
-> GitHub Action and the release pipeline are done. Not yet done: the live
-> deployment and the first published release, both of which need accounts
-> rather than code.
+> GitHub Action is on the Marketplace, and a release publishes to PyPI and
+> GHCR, produces SLSA provenance and redeploys the platform on its own.
+> Attaching the corpus is the one step a human still does, because building
+> one takes hours and no CI job lives that long — so a release stays a
+> draft until it is attached, and `latest` does not move until then.
+>
+> What is left is corpus work rather than engineering. **33.1 % of the 7,663
+> PyPI advisories that have a fix to diff carry a high- or medium-confidence
+> symbol**, against the 60–75 % this design targets — so a finding against a
+> package whose advisories are not yet extracted comes back *under
+> investigation* rather than cleared. The other 12,094 PyPI records are
+> malicious-package advisories, which have no fix and for which reachability
+> is the wrong question; they are excluded from that figure deliberately,
+> because including them reports 15.5 % and makes a working corpus look
+> broken. The daily refresh chips at the gap. And the run measured above is
+> five repositories, not the twenty-five in the benchmark manifest. Both are
+> written up under *Symbol coverage is the real limit* in
+> [limitations](docs/guide/limitations.md).
+>
+> The conclusions are publishable: `vexpath vex export` writes OpenVEX 0.2.0 or
+> CycloneDX VEX, `vexpath attest sign` wraps either in a signed in-toto
+> attestation, and `vexpath scan --policy` gates a build on them in CEL.
 
 ## Documentation
 
@@ -66,10 +85,6 @@ It ingests SBOMs (CycloneDX, SPDX) or generates them from a repository, matches 
 
 Start with [limitations](docs/guide/limitations.md) if you are deciding
 whether to trust it. It is the page that says what this does badly.
->
-> The conclusions are publishable: `vexpath vex export` writes OpenVEX 0.2.0 or
-> CycloneDX VEX, `vexpath attest sign` wraps either in a signed in-toto
-> attestation, and `vexpath scan --policy` gates a build on them in CEL.
 
 ## Quick start
 
@@ -81,22 +96,39 @@ make check                         # lint, type-check and run the unit tests
 export VEXPATH_ADVISORY_SNAPSHOT_DIR=testdata/advisories
 uv run vexpath scan testdata/repos/direct-call
 
-# Or download a current corpus first, then scan your own project.
-uv run vexpath advisory sync var/advisories
-uv run vexpath scan . --snapshot var/advisories
+# Now your own project, against the published corpus. `pull` is the one to
+# use: it downloads the corpus *with its vulnerable symbols*, verified against
+# its own content hash, and every command finds it afterwards with no flag.
+# `advisory sync` downloads advisories straight from OSV, which ships no
+# symbols -- so a scan against that reports almost everything as
+# `symbols_unknown`, which is honest and useless.
+#
+# Unset first: the variable set above takes precedence over the downloaded
+# corpus, deliberately, so leaving it exported would quietly scan against the
+# handful of fixture advisories instead.
+unset VEXPATH_ADVISORY_SNAPSHOT_DIR
+uv run vexpath advisory pull
+uv run vexpath scan .
 
 # Disagree with a verdict? Make it show its work, one advisory at a time.
-uv run vexpath reach . --advisory CVE-2024-35195 --snapshot var/advisories
+uv run vexpath reach . --advisory CVE-2024-35195
 
 make up                            # Postgres, migrations, API and seeded advisories
 curl localhost:8000/healthz
 
-# The corpus a scan really wants: downloaded, then enriched with the symbols
-# each advisory's fix commit changed. OSV does not publish those.
+# Building a corpus yourself, which `advisory pull` exists so that nobody has
+# to. Worth doing only for an ecosystem or a fork this project does not
+# publish: extraction clones every upstream repository and diffs every fix
+# commit, which is hours.
 uv run python -m vexpath_worker.main sync-advisories var/corpus --ecosystem PyPI
 uv run python -m vexpath_worker.main extract-symbols --batch 500 --cache-root var/repo-cache
 uv run python -m vexpath_worker.main export-snapshot var/enriched --ecosystem PyPI
 uv run vexpath scan . --snapshot var/enriched
+
+# Refreshing one without throwing that work away. A fresh download carries no
+# symbols, and loading it over the database would delete every extracted one,
+# so the merge happens over snapshots first.
+uv run python -m vexpath_worker.main refresh-corpus var/enriched var/refreshed
 ```
 
 Extraction is a long crawl, and it is built to be stopped: every advisory's
@@ -140,7 +172,7 @@ reports matching alone and says so in the output.
 | [docs/08-glossary.md](docs/08-glossary.md) | Terms used throughout |
 | [docs/adr/](docs/adr/) | Architecture Decision Records |
 
-## Planned repository layout (monorepo)
+## Repository layout (monorepo)
 
 ```
 .

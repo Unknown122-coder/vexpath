@@ -41,28 +41,46 @@ else (`--sbom`).
 ## Symbol coverage is the real limit
 
 A finding can only be cleared if the advisory's fix has been diffed into
-functions. Today:
+functions. Measured on the published corpus, 2026-11-27:
 
-- **88.7%** of analysable Python advisories have a recoverable fix commit;
-  **62.0%** resolve to an exact commit.
-- Roughly **9,000 symbols across 438 advisories** have been extracted, with
-  about **6,800 PyPI advisories still pending**. Extraction is a resumable
-  crawl over upstream repositories and works through the corpus over time.
-- **Two advisories in five** name only a release tag. Diffing a tag against
-  its parent describes the wrong change — a tag's commit *is* the release — so
-  it is deliberately not done. Doing it properly means diffing the previous
-  release tag against the fixed one, at low confidence, and that source is not
-  wired in yet.
+| | |
+|---|---|
+| PyPI advisories in the corpus | 19,757 |
+| — malicious-package records, which have no fix | 12,094 |
+| — analysable: they name a fix to diff | 7,663 |
+| — analysable, with at least one symbol | 3,053 (39.8 %) |
+| **— analysable, with a high- or medium-confidence symbol** | **2,535 (33.1 %)** |
+| Symbols extracted | 27,869 across 802 packages |
+| Analysable advisories still waiting | 4,610 |
+
+The design target is 60–75 % on the last of those, so this is roughly half way.
+Extraction is a resumable crawl over upstream repositories, and a scheduled
+job works through the backlog daily while carrying forward everything already
+extracted.
+
+**Check the denominator before believing any of these.** Over *all* PyPI
+records the same corpus reads 15.5 %, which makes a working system look
+broken: two records in three are `MAL-` malicious-package advisories that have
+no fix commit and for which reachability is the wrong question entirely —
+installing the package is the compromise. That mistake has been made three
+times here, once reporting fix-commit recoverability as 32.9 % when it was
+88.7 %.
+
+Where the symbols come from, since provenance decides how much a verdict is
+worth:
+
+- **24,600** from an advisory's fix commit, diffed directly.
+- **3,265** from a tag-to-tag diff, for the two advisories in five that name
+  only a release. A tag's commit *is* the release, so diffing it against its
+  parent would describe the wrong change; these diff the previous release
+  against the fixed one instead, and are recorded at low confidence because a
+  release contains more than its fix.
+- **4** curated by hand.
 
 So a finding you expected to be cleared may simply have no symbols yet. The
-report says `no_symbols` rather than guessing, and the package pages show
-exactly which advisories have symbols and which do not.
-
-One number worth knowing because it misled us three times: 88.7% was first
-measured as 32.9%, because 11,992 of 18,930 PyPI records are `MAL-`
-malicious-package advisories that have no fix and for which reachability is
-the wrong question entirely. Check the denominator before believing a bad
-number.
+report says `symbols_unknown`, with the reason `no_fix_commit`, rather than
+guessing — and the package pages show exactly which advisories have symbols
+and which do not.
 
 ## What reachability cannot see
 
